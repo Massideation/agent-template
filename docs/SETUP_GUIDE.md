@@ -2,7 +2,7 @@
 
 ## What you are building
 
-You are about to set up a small autonomous AI agent that wakes itself up every day at 9 AM Eastern Time, decides what to think about, writes a short entry in a public diary, and sends you a private message on Telegram with whatever it wants you to know. It runs entirely on free services. Your running cost is $0 per month, forever.
+You are about to set up a small autonomous AI agent that wakes itself up four times a day (every 6 hours), decides whether it has anything new to say, writes a short entry in a public diary on the wakes where it does, and sends you a private message on Telegram with whatever it wants you to know. It runs entirely on free services. Your running cost is $0 per month, forever. (Most wakes are silent, so the public diary stays scannable.)
 
 ## Easiest path: have a free AI walk you through it
 
@@ -177,7 +177,7 @@ Replace the word `null` with your numeric Telegram user ID from Step 6. Use just
 
 Scroll down past the file. Click the green "Commit changes" button, then click "Commit changes" in the popup. About 30 seconds.
 
-Now go back to Telegram on your phone. Use the search box at the top to find the bot you created in Step 5 (search by its username, like `myname_agent_bot`). Tap it. Tap "Start" or send any message like `hi`. From the next wake on (tomorrow at 9 AM Eastern), the agent will read your messages and may reply.
+Now go back to Telegram on your phone. Use the search box at the top to find the bot you created in Step 5 (search by its username, like `myname_agent_bot`). Tap it. Tap "Start" or send any message like `hi`. From the next wake on (within the next 6 hours), the agent will read your messages and may reply.
 
 ### Step 12: (Optional but recommended) Deploy your diary to Vercel
 
@@ -191,13 +191,13 @@ After about 30 seconds Vercel finishes and shows you a URL like `yourname-agent-
 
 ## After setup: what happens next
 
-Tomorrow at 9 AM Eastern Time, your agent wakes automatically. It reads its memory, looks at recent messages from you on Telegram, decides what to publish and what to DM you, posts both. Then it goes to sleep until the next morning.
+Every 6 hours, your agent wakes automatically (midnight, 6 AM, noon, and 6 PM UTC by default; adjust the cron in `.github/workflows/wake.yml` if you want a different schedule, or hourly). On each wake it reads its memory, looks at recent messages from you on Telegram, and decides whether to publish a public entry, DM you, or rest until the next wake.
 
 You do not need to be at your computer. You do not need to do anything. The agent runs on GitHub's servers.
 
 ## Common gotchas
 
-- **Cron drift**: GitHub Actions free tier cron can delay by 5 to 15 minutes during heavy load. If 9 AM passes and nothing happens, check again at 9:30. If still nothing, manually trigger from the Actions tab the same way you did in Step 9.
+- **Cron drift**: GitHub Actions free tier cron can delay by 5 to 15 minutes during heavy load. If a scheduled wake passes and nothing happens, check the Actions tab in 30 minutes. If still nothing, manually trigger from the Actions tab the same way you did in Step 9. The next scheduled wake also runs as normal.
 - **OpenRouter free models can change**. If a wake fails because no model returned content, the agent logs that honestly and tries again next day. You can also update the model list in `config/settings.yaml`.
 - **Style guard rejections**: the agent has a style guard that rejects em dashes and certain words. If your agent drafts something rejected, the public log gets a brief stub instead. Tomorrow it tries again.
 
