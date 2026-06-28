@@ -28,6 +28,7 @@ from typing import Optional
 
 import httpx
 
+from src import inbox
 from src.executor import TaskResult
 from src.logger import DISCLOSURE_FOOTER
 from src.memory import State
@@ -134,6 +135,37 @@ def _build_recent_telegram_block(notes: list[str]) -> str:
     return "\n\n".join(excerpts)
 
 
+def _build_inbox_block(notes: list[str]) -> tuple[str, list[dict]]:
+    """Return (formatted_block, raw_messages). Empty messages give empty block.
+
+    Each line in the block: "  - id: <message_id>, sent <ts iso>, text: <first 500 chars>".
+    """
+    try:
+        pending = inbox.list_pending_messages()
+    except Exception as exc:
+        notes.append(f"inbox read failed: {exc}")
+        return "", []
+
+    if not pending:
+        return "", []
+
+    from datetime import datetime, timezone
+
+    lines: list[str] = []
+    for msg in pending:
+        try:
+            ts_iso = datetime.fromtimestamp(
+                msg["ts"] / 1000.0, tz=timezone.utc
+            ).isoformat()
+        except Exception:
+            ts_iso = str(msg.get("ts", ""))
+        snippet = (msg.get("content") or "")[:500]
+        lines.append(
+            f"  - id: {msg['id']}, sent {ts_iso}, text: {snippet}"
+        )
+    return "\n".join(lines), pending
+
+
 def _build_prompt(
     name: str,
     statement: str,
@@ -142,10 +174,19 @@ def _build_prompt(
     recent_public_block: str,
     recent_telegram_block: str,
     peer_block: str = "",
+    inbox_block: str = "",
 ) -> str:
     peer_section = (
         f"Peer agent context (metadata only, sanitized):\n{peer_block}\n\n"
         if peer_block
+        else ""
+    )
+    inbox_section = (
+        "\n\nOperator inbox (pending messages from the operator via the "
+        "admin web UI). Reply with inbox_reply.message_id matching one of "
+        "these:\n"
+        f"{inbox_block}\n"
+        if inbox_block
         else ""
     )
     return (
@@ -183,6 +224,7 @@ def _build_prompt(
         "\n"
         "Recent private messages between you and Miguel (most recent first):\n"
         f"{recent_telegram_block}\n"
+        f"{inbox_section}"
         "\n"
         "Your task right now: decide what to say this wake. You can do any of:\n"
         "\n"
@@ -194,6 +236,11 @@ def _build_prompt(
         "to evaluate, a competitor to read), list up to 3 short Google-style "
         "queries in search_queries. Code will run them and feed results back "
         "to you for a second pass. Leave empty if you don't need to search.\n"
+        "- Reply privately to a pending operator inbox message. If there are "
+        "any pending inbox messages listed above, you may answer one by "
+        "returning inbox_reply with the matching message_id and your text. "
+        "Only one inbox reply per wake; reply to the most relevant pending "
+        "message. Otherwise omit inbox_reply or set it to null.\n"
         "- Rest. If you have nothing new to say since your last wake (no new "
         "Telegram, no new peer agents, no fresh thought), return an empty "
         "string for public_summary. Most hourly wakes should be silent. "
