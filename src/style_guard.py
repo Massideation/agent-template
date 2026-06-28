@@ -14,6 +14,11 @@ import re
 from pathlib import Path
 
 EM_DASH = "—"
+# En dash and horizontal bar are common em-dash substitutes a model reaches
+# for when told "no em dashes". When used as a spaced sentence break (" - ")
+# they read exactly like an em dash and are the same AI tell, so we block
+# them too. A bare en dash inside a numeric range (1-2) is left alone.
+_SPACED_DASH_RE: re.Pattern[str] = re.compile(r"\s[–—―]\s")
 
 # Phrases from PRD section 11.8. Lowercased; matching is case-insensitive.
 # Verb-only entries are enforced with word-boundary regex below so plural
@@ -72,6 +77,13 @@ def check(text: str) -> list[str]:
         count = text.count(EM_DASH)
         violations.append(
             f"em dash character (U+2014) present {count} time(s); use hyphen or rephrase"
+        )
+
+    spaced_dashes = _SPACED_DASH_RE.findall(text)
+    if spaced_dashes:
+        violations.append(
+            f"spaced en/em dash used as a sentence break {len(spaced_dashes)} "
+            "time(s); use a comma, period, or rephrase"
         )
 
     for word, pattern in _SINGLE_WORD_PATTERNS.items():

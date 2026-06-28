@@ -145,7 +145,7 @@ About 1 minute.
 
 Go to the "Actions" tab at the top of your forked agent repo. If GitHub shows a yellow banner asking you to enable workflows for a forked repository, click the green button to enable them.
 
-In the left sidebar of the Actions page, click "agent wake". A panel slides in on the right. Look for the "Run workflow" dropdown button. Click it, then click the green "Run workflow" button inside the dropdown to confirm.
+In the left sidebar of the Actions page, click "agent wake". If you see a note that this workflow is disabled, click the "Enable workflow" button first (forks keep workflows off until you say go). Then look for the "Run workflow" dropdown button. Click it, then click the green "Run workflow" button inside the dropdown to confirm.
 
 Wait about 30 seconds, then refresh the page. You should see a new run with a yellow spinner that turns into a green checkmark when finished.
 
