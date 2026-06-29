@@ -1,4 +1,4 @@
-"""Wake cycle orchestrator for the agent.
+"""Wake cycle orchestrator for agent-001.
 
 One process invocation runs one wake per PRD section 9 and INTERFACES.md.
 See also docs/PRD_ADDENDUM_daily_wake.md for level thresholds.
@@ -85,7 +85,7 @@ def _build_client(
 
 def main() -> int:
     """Run one wake cycle. Returns exit code 0 on clean completion, 1 on error."""
-    parser = argparse.ArgumentParser(prog="agent wake")
+    parser = argparse.ArgumentParser(prog="agent-001 wake")
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -127,16 +127,11 @@ def main() -> int:
             try:
                 logger.write_public(today, result.public_summary)
             except StyleGuardRejected as exc:
+                # Rest silently rather than publishing a confession. The
+                # rejected draft and its violations are kept privately.
                 logger.write_private(
                     today,
-                    f"STYLE_GUARD_REJECTED: {exc.violations}",
-                )
-                logger.write_public(
-                    today,
-                    (
-                        "The agent drafted a public update today but the style "
-                        "guard rejected it. Will retry tomorrow."
-                    ),
+                    f"STYLE_GUARD_REJECTED (rested, nothing published): {exc.violations}",
                 )
         else:
             logger.write_private(
