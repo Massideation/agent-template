@@ -1,4 +1,4 @@
-"""State persistence and durable memory for the agent.
+"""State persistence and durable memory for agent-001.
 
 Owns the on-disk schema for state/*.json and memory/agent_memory.md.
 Public surface defined in docs/INTERFACES.md.
@@ -31,7 +31,7 @@ TELEGRAM_FILE = STATE_DIR / "telegram.json"
 EMAIL_FILE = STATE_DIR / "email.json"
 IDENTITY_FILE = STATE_DIR / "identity.json"
 
-DEFAULT_DAILY_CALL_LIMIT = 10
+DEFAULT_DAILY_CALL_LIMIT = 40
 
 
 class QuotaState(BaseModel):

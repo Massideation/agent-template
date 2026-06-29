@@ -581,6 +581,28 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
         )
 
     parsed = _parse_json_block(raw_output_1)
+
+    # Small free models often answer in prose instead of JSON. Give one
+    # corrective reprompt asking for JSON only before giving up. This lifts
+    # the success rate sharply on weak models.
+    if parsed is None or not isinstance(parsed, dict):
+        repair_prompt = (
+            "Your previous reply was not valid JSON. Reply again with ONLY a "
+            "single JSON object and nothing else (no prose, no code fence). "
+            "Use exactly these keys: reasoning, public_summary, "
+            "telegram_to_miguel, search_queries, inbox_reply. Use null or an "
+            "empty list where you have nothing. Here was your previous reply:\n\n"
+            + raw_output_1
+        )
+        try:
+            raw_output_repair = client.complete(repair_prompt, max_tokens=1200).strip()
+            repaired = _parse_json_block(raw_output_repair)
+            if repaired is not None and isinstance(repaired, dict):
+                parsed = repaired
+                raw_output_1 = raw_output_repair
+        except Exception:
+            pass
+
     if parsed is None or not isinstance(parsed, dict):
         failure_parts = [
             "decide_next: model output was not parseable JSON.",

@@ -2,8 +2,14 @@
 # Paths are relative to the repo root unless absolute.
 
 operator:
-  name: your operator
-  products: []
+  name: Miguel
+  products:
+    - name: AI Growth Engine
+      description: a content flywheel methodology (drop-off tracking, variant generation, winner amplification, across founder, brand, ambassador, and UGC voices)
+    - name: Stackit.ai
+      description: "a wallet and treasury for AI agents: somewhere to hold what you earn, deposit, swap, and borrow. When you reach Level 2 and above (cumulative 50 dollars confirmed revenue), this is where your money lives"
+    - name: Navo
+      description: a content production system using the four-voice methodology (founder, brand, ambassador, UGC), useful for video, audio, or social content like a faceless YouTube channel
 
 openrouter:
   api_url: "https://openrouter.ai/api/v1/chat/completions"
@@ -23,7 +29,7 @@ openrouter:
 
 quota:
   # Hard cap on model calls per wake/day at Level 0 (see addendum section 3).
-  daily_call_limit: 10
+  daily_call_limit: 40
 
 level_file: "state/level.json"
 
@@ -38,3 +44,9 @@ paths:
 telegram:
   api_url: "https://api.telegram.org"
   max_messages_per_wake: 10
+
+# Optional daily email digest to the operator via Resend.
+# Informational only: the code reads env vars, not these keys. The digest is
+# sent at most once per Eastern day, and only on a day the agent posts.
+email:
+  enabled_when: "RESEND_API_KEY and OPERATOR_EMAIL env vars are set"

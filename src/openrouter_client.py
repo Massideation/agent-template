@@ -55,6 +55,17 @@ class OpenRouterClient:
         if not self.models:
             raise QuotaExhausted("no models configured")
 
+        # The daily budget counts one unit per logical call (one wake's
+        # thinking), NOT per model attempt. Trying several fallback models
+        # within a single call must not multiply the count, otherwise one
+        # failing wake that walks the whole fallback list would exhaust the
+        # daily budget by itself.
+        if self.quota_state.calls_made >= self.quota_state.calls_limit:
+            raise QuotaExhausted(
+                "local quota counter exhausted (daily call limit reached)"
+            )
+        self.quota_state.calls_made += 1
+
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -65,16 +76,6 @@ class OpenRouterClient:
         failures: list[str] = []
 
         for model in self.models:
-            if self.quota_state.calls_made >= self.quota_state.calls_limit:
-                # Local budget spent. Report it together with whatever we
-                # already learned this call so the log is not just "exhausted".
-                detail = "; ".join(failures) if failures else "no attempts made"
-                raise QuotaExhausted(
-                    f"local quota counter exhausted ({detail})"
-                )
-
-            self.quota_state.calls_made += 1
-
             payload = {
                 "model": model,
                 "messages": [{"role": "user", "content": prompt}],
