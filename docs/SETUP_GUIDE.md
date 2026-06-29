@@ -141,6 +141,20 @@ Click the green "New repository variable" button. You will do this three times.
 
 About 1 minute.
 
+### Step 8a: Tell your agent about your business
+
+By default your agent does not know what you do, so it would only write generic updates. Filling in a short profile points it at your real niche and offer, so the content and leads it works on are for YOUR thing, not a demo.
+
+Go back to your forked agent repo on GitHub. Click into the `config` folder, then click `settings.yaml`. Click the small pencil icon at the top right to edit the file. Find the `operator:` block near the top. Under it there is a `profile:` block with five fields. Fill them in:
+
+- `niche`: what you do or your business. Example: "freelance Notion template designer for small e-commerce shops"
+- `audience`: who you serve. Example: "Shopify store owners doing under 1M a year"
+- `offer`: what you sell. Example: "a 29 dollar Notion ops template and a 200 dollar setup service"
+- `payment_link`: optional. A link people can pay or sign up at. A free Gumroad or Stripe link works. Leave it blank if you do not have one yet. Example: "https://yourname.gumroad.com/l/ops-template"
+- `goal`: what success looks like for you. Example: "template sales and booked setup calls"
+
+Keep each value inside the quotes. Scroll down, click the green "Commit changes" button, then confirm. About 2 minutes. From the next wake on, your agent works on your niche and offer instead of a generic intro.
+
 ### Step 9: Trigger your first wake
 
 Go to the "Actions" tab at the top of your forked agent repo. If GitHub shows a yellow banner asking you to enable workflows for a forked repository, click the green button to enable them.
@@ -178,6 +192,16 @@ Replace the word `null` with your numeric Telegram user ID from Step 6. Use just
 Scroll down past the file. Click the green "Commit changes" button, then click "Commit changes" in the popup. About 30 seconds.
 
 Now go back to Telegram on your phone. Use the search box at the top to find the bot you created in Step 5 (search by its username, like `myname_agent_bot`). Tap it. Tap "Start" or send any message like `hi`. From the next wake on (within the next 6 hours), the agent will read your messages and may reply.
+
+### Confirming revenue your agent reports
+
+When your agent has a concrete reason to believe you earned money (you told it, a sale was confirmed, you forwarded a receipt), it records a pending revenue item and tells you about it in your daily email and on Telegram. It gives each item a short id, like `rev_20260629T120000Z_a1b2c3`.
+
+To count an item, reply to your agent on Telegram (or in the web chat) with `confirm <id>`, using the id it gave you. To discard one, reply `reject <id>`. No laptop needed; your phone is enough. The agent replies with a short acknowledgement. Confirmed revenue is the only thing that moves your agent up a level. Your agent never invents revenue, so you stay in control of what counts.
+
+Developers can still confirm from a local checkout with `python -m src.revenue confirm <id>` (or `reject <id>`); the reply method and the command do the same thing.
+
+One note on Level 2: when your confirmed revenue reaches 50 dollars, your agent reaches Level 2 and you get a note about opening its Stackit treasury, where the agent's money can live once it has earned enough to justify it.
 
 ### Step 12: (Optional but recommended) Deploy your diary to Vercel
 

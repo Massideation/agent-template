@@ -12,10 +12,12 @@ Skips cleanly when there is no token, no LLM client, or no new messages.
 from __future__ import annotations
 
 import os
+import re
 from typing import Optional
 
 import httpx
 
+from src import revenue
 from src.executor import TaskResult
 from src.logger import DISCLOSURE_FOOTER
 from src.memory import State
@@ -25,6 +27,11 @@ from src.style_guard import check as style_check
 
 TELEGRAM_API = "https://api.telegram.org"
 MAX_MESSAGES_PER_WAKE = 10
+
+# Matches an operator command that is exactly "confirm <id>" or "reject <id>",
+# case-insensitive, tolerant of surrounding whitespace. The id is a single
+# non-whitespace token.
+_CMD = re.compile(r"^\s*(confirm|reject)\s+(\S+)\s*$", re.IGNORECASE)
 
 
 def _get_token() -> Optional[str]:
@@ -53,6 +60,36 @@ def _send_message(token: str, chat_id: int, text: str) -> dict:
     resp = httpx.post(url, json=payload, timeout=15.0)
     resp.raise_for_status()
     return resp.json()
+
+
+def _handle_revenue_command(text: str) -> Optional[str]:
+    """Return an ack string if text is a confirm/reject command, else None.
+
+    The text is matched against _CMD (case-insensitive, trimmed). On a match
+    the corresponding revenue.confirm / revenue.reject is called and a short
+    fixed ack is returned. A missing id (KeyError) yields a not-found ack. When
+    the text is not a command this returns None so the caller falls through to
+    the normal model reply path.
+    """
+    match = _CMD.match(text or "")
+    if not match:
+        return None
+
+    action = match.group(1).lower()
+    rev_id = match.group(2)
+
+    if action == "confirm":
+        try:
+            revenue.confirm(rev_id)
+        except KeyError:
+            return f"No pending revenue with id {rev_id}."
+        return f"Confirmed {rev_id}. It now counts toward your level."
+
+    try:
+        revenue.reject(rev_id)
+    except KeyError:
+        return f"No pending revenue with id {rev_id}."
+    return f"Rejected {rev_id}. Discarded."
 
 
 def _draft_reply(client: OpenRouterClient, message: dict) -> str:
@@ -204,6 +241,44 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
             continue
 
         state.telegram.last_chat_id = chat_id
+
+        ack_text = _handle_revenue_command(text)
+        if ack_text is not None:
+            # Operator command handled without the model. The ack is a fixed
+            # string (no em dashes, no banned words) but is run through the
+            # style guard for consistency before sending.
+            violations = style_check(ack_text)
+            if violations:
+                summary_lines.append(
+                    f"update_id={update_id}: revenue ack style guard rejected "
+                    f"for {first_name} (user_id={user_id}): "
+                    f"{', '.join(violations)}"
+                )
+                if update_id > max_update_id:
+                    max_update_id = update_id
+                continue
+
+            full_ack = f"{ack_text}\n\n{DISCLOSURE_FOOTER}"
+            try:
+                _send_message(token, chat_id, full_ack)
+            except httpx.HTTPError as exc:
+                summary_lines.append(
+                    f"update_id={update_id}: revenue ack sendMessage failed "
+                    f"for {first_name} (user_id={user_id}, "
+                    f"chat_id={chat_id}): {exc}"
+                )
+                if update_id > max_update_id:
+                    max_update_id = update_id
+                continue
+
+            summary_lines.append(
+                f"Revenue command handled from @{first_name} "
+                f"(user_id={user_id}, chat_id={chat_id}): {ack_text}"
+            )
+            replies_sent += 1
+            if update_id > max_update_id:
+                max_update_id = update_id
+            continue
 
         try:
             reply_text = _draft_reply(client, message)

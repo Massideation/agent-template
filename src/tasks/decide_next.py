@@ -23,12 +23,15 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 import httpx
 
 from src import inbox
+from src import revenue
 from src.executor import TaskResult
 from src.logger import DISCLOSURE_FOOTER
 from src.memory import State, load_operator_context
@@ -178,6 +181,29 @@ def _build_prompt(
 ) -> str:
     operator = load_operator_context()
     operator_name = operator["name"]
+    profile = operator.get("profile", {})
+    niche = str(profile.get("niche") or "").strip()
+    audience = str(profile.get("audience") or "").strip()
+    offer = str(profile.get("offer") or "").strip()
+    payment_link = str(profile.get("payment_link") or "").strip()
+    goal = str(profile.get("goal") or "").strip()
+
+    # Build the profile block. Only non-empty lines are emitted, so an
+    # unconfigured fork sees a clean prompt and a filled profile sees the
+    # full block.
+    profile_lines: list[str] = []
+    if niche:
+        profile_lines.append(f"Your operator {operator_name} works on: {niche}")
+    if audience:
+        profile_lines.append(f"They serve: {audience}")
+    if offer:
+        profile_lines.append(f"They sell: {offer}")
+    if payment_link:
+        profile_lines.append(f"Payment or signup link: {payment_link}")
+    if goal:
+        profile_lines.append(f"Their goal: {goal}")
+    profile_block = ("\n".join(profile_lines) + "\n\n") if profile_lines else ""
+
     last_public = recent_public_block.strip() or "(none yet)"
     last_operator_msg = recent_telegram_block.strip() or "(none)"
     inbox_line = (
@@ -188,6 +214,7 @@ def _build_prompt(
     return (
         f"You are {name}. {directive}\n"
         "\n"
+        f"{profile_block}"
         f"Your most recent public diary entry:\n{last_public}\n"
         "\n"
         f"Most recent message from {operator_name}:\n{last_operator_msg}\n"
@@ -195,7 +222,15 @@ def _build_prompt(
         "\n"
         "TASK: Write one short, honest update for your public diary. 2 to 4 "
         "sentences about what you are working on or thinking about today. "
-        "Plain text, no em dashes, no marketing copy, no invented facts.\n"
+        "Work on the operator niche and offer above, not generic "
+        "agent-building. Plain text, no em dashes, no marketing copy, no "
+        "invented facts.\n"
+        "\n"
+        f"If you have a concrete reason to believe {operator_name} earned "
+        "money (an operator message, a confirmed sale, a forwarded receipt), "
+        "set revenue_claim with amount_usd, source, and evidence. Otherwise "
+        "set it to null. Do NOT invent revenue. A guess, a hope, or a "
+        "projection is null.\n"
         "\n"
         "Return ONLY this JSON. public_summary is the field that matters; the "
         "rest can be null or empty:\n"
@@ -204,7 +239,8 @@ def _build_prompt(
         '  "reasoning": null,\n'
         '  "telegram_to_miguel": null,\n'
         '  "search_queries": [],\n'
-        '  "inbox_reply": null\n'
+        '  "inbox_reply": null,\n'
+        '  "revenue_claim": null\n'
         "}\n"
     )
 
@@ -269,6 +305,48 @@ def _clean_search_queries(raw_value) -> tuple[list[str], list[str]]:
         cleaned = cleaned[:3]
 
     return cleaned, notes
+
+
+def _validate_revenue_claim(raw_value) -> tuple[Optional[dict], str]:
+    """Validate a raw revenue_claim value.
+
+    Returns (clean_claim, status). clean_claim is a dict with keys
+    amount_usd (float), source (str), evidence (str) when every rule passes,
+    else None with a status describing why it was skipped. Never raises.
+
+    Rules (all must pass): the claim is a dict; amount_usd parses to a float
+    that is > 0 and < 100000 (cap rejects a hallucinated huge number); source
+    and evidence are non-empty strings after strip (capped in length).
+    """
+    if raw_value is None:
+        return None, "none"
+    if not isinstance(raw_value, dict):
+        return None, f"skipped: not a dict ({type(raw_value).__name__})"
+
+    try:
+        amount = float(raw_value.get("amount_usd"))
+    except (TypeError, ValueError):
+        return None, "skipped: amount_usd not a number"
+    if not (amount > 0):
+        return None, "skipped: amount_usd not positive"
+    if amount >= 100000:
+        return None, "skipped: amount_usd above sanity cap"
+
+    source = str(raw_value.get("source") or "").strip()
+    if not source:
+        return None, "skipped: empty source"
+    source = source[:200]
+
+    evidence = str(raw_value.get("evidence") or "").strip()
+    if not evidence:
+        return None, "skipped: empty evidence"
+    evidence = evidence[:500]
+
+    return {
+        "amount_usd": amount,
+        "source": source,
+        "evidence": evidence,
+    }, "valid"
 
 
 def _run_searches(queries: list[str]) -> dict[str, list[dict]]:
@@ -451,8 +529,9 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
             "Your previous reply was not valid JSON. Reply again with ONLY a "
             "single JSON object and nothing else (no prose, no code fence). "
             "Use exactly these keys: reasoning, public_summary, "
-            "telegram_to_miguel, search_queries, inbox_reply. Use null or an "
-            "empty list where you have nothing. Here was your previous reply:\n\n"
+            "telegram_to_miguel, search_queries, inbox_reply, revenue_claim. "
+            "Use null or an empty list where you have nothing. Here was your "
+            "previous reply:\n\n"
             + raw_output_1
         )
         try:
@@ -765,6 +844,45 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
     except Exception as exc:
         inbox_status = f"errored: {exc}"
 
+    # Revenue claim. Prefer call 2's revenue_claim if call 2 was used and the
+    # key is present, else fall back to call 1's (same precedence pattern used
+    # for inbox_reply). Runs after dispatch so a malformed claim never blocks
+    # the public post. The whole block is guarded so a ledger I/O error
+    # degrades to a logged note and the wake still succeeds. Honesty is
+    # enforced by _validate_revenue_claim plus the prompt instruction: never
+    # invent revenue.
+    revenue_status: str
+    try:
+        revenue_claim_raw = None
+        if used_call_2 and parsed_2 is not None and "revenue_claim" in parsed_2:
+            revenue_claim_raw = parsed_2.get("revenue_claim")
+        if revenue_claim_raw is None:
+            revenue_claim_raw = parsed.get("revenue_claim")
+
+        clean_claim, claim_status = _validate_revenue_claim(revenue_claim_raw)
+        if clean_claim is not None:
+            now = datetime.now(timezone.utc)
+            ev = revenue.PendingRevenue(
+                id=(
+                    f"rev_{now.strftime('%Y%m%dT%H%M%SZ')}_"
+                    f"{uuid.uuid4().hex[:6]}"
+                ),
+                ts=now.isoformat(),
+                amount_usd=float(clean_claim["amount_usd"]),
+                source=clean_claim["source"],
+                evidence=clean_claim["evidence"],
+                claimed_by_wake=str(state.wake_count),
+            )
+            revenue.append_pending(ev)
+            revenue_status = (
+                f"appended pending {ev.id} amount_usd={ev.amount_usd} "
+                f"source={ev.source}"
+            )
+        else:
+            revenue_status = claim_status
+    except Exception as exc:
+        revenue_status = f"errored: {type(exc).__name__}: {exc}"
+
     # Build the private summary. Public output never sees this block.
     model_calls_used = 2 if second_call_used else 1
     if second_call_used and used_call_2:
@@ -857,6 +975,7 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
     summary_parts.append(f"telegram_status: {telegram_status}")
     summary_parts.append(f"inbox_status: {inbox_status}")
     summary_parts.append(f"inbox_pending_count: {len(pending_inbox)}")
+    summary_parts.append(f"revenue_status: {revenue_status}")
     summary_parts.append(
         f"final_source: {'call_2' if used_call_2 else 'call_1'}"
     )

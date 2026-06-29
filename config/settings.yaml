@@ -2,14 +2,31 @@
 # Paths are relative to the repo root unless absolute.
 
 operator:
-  name: Miguel
-  products:
-    - name: AI Growth Engine
-      description: a content flywheel methodology (drop-off tracking, variant generation, winner amplification, across founder, brand, ambassador, and UGC voices)
-    - name: Stackit.ai
-      description: "a wallet and treasury for AI agents: somewhere to hold what you earn, deposit, swap, and borrow. When you reach Level 2 and above (cumulative 50 dollars confirmed revenue), this is where your money lives"
-    - name: Navo
-      description: a content production system using the four-voice methodology (founder, brand, ambassador, UGC), useful for video, audio, or social content like a faceless YouTube channel
+  # Your first name is read from the OPERATOR_NAME environment variable, not
+  # from here. The profile below tells your agent what YOU do, so it works on
+  # your niche and offer instead of a generic intro. See docs/SETUP_GUIDE.md.
+  profile:
+    # What you do or your business.
+    # Example: "freelance Notion template designer for small e-commerce shops"
+    niche: ""
+    # Who you serve.
+    # Example: "Shopify store owners doing under 1M a year"
+    audience: ""
+    # What you sell.
+    # Example: "a 29 dollar Notion ops template and a 200 dollar setup service"
+    offer: ""
+    # Optional. A link people can pay or sign up at. A free Gumroad or Stripe
+    # link works. Leave blank if you do not have one yet.
+    # Example: "https://yourname.gumroad.com/l/ops-template"
+    payment_link: ""
+    # What success looks like for you.
+    # Example: "template sales and booked setup calls"
+    goal: ""
+  # Optional list of things you sell or make. Each item is {name, description}.
+  # Leave empty to start. Example:
+  #   - name: Ops Template
+  #     description: a Notion template that runs a small store's daily operations
+  products: []
 
 openrouter:
   api_url: "https://openrouter.ai/api/v1/chat/completions"

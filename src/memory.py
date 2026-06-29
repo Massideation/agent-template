@@ -55,6 +55,9 @@ class TelegramState(BaseModel):
     last_update_id: int = 0
     last_chat_id: Optional[int] = None
     operator_telegram_user_id: Optional[int] = None
+    # Eastern YYYY-MM-DD of the last pending-revenue confirm nudge sent on
+    # Telegram. Used to keep the nudge to once per day while items are pending.
+    last_confirm_nudge_date: str = ""
 
 
 class EmailState(BaseModel):
@@ -198,28 +201,56 @@ def read_memory() -> str:
         return f.read()
 
 
-def load_operator_context() -> dict:
-    """Return operator identity for prompts and disclosures.
+def _empty_profile() -> dict:
+    """Return the all-empty operator profile dict (safe fallback)."""
+    return {
+        "niche": "",
+        "audience": "",
+        "offer": "",
+        "payment_link": "",
+        "goal": "",
+    }
 
-    Returns {"name": str, "products": list[dict]}. The name comes from the
-    OPERATOR_NAME environment variable (default "your operator"). The products
-    come from config/settings.yaml under operator.products, where each item is
-    a {name, description} mapping. Any read or parse failure yields [].
+
+def load_operator_context() -> dict:
+    """Return operator identity and profile for prompts and disclosures.
+
+    Returns a dict with these keys, all always present:
+
+      - "name": str. From the OPERATOR_NAME environment variable, default
+        "your operator".
+      - "products": list[dict]. From config/settings.yaml under
+        operator.products, where each item is a {name, description} mapping.
+      - "profile": dict with the five string fields niche, audience, offer,
+        payment_link, and goal. Read from config/settings.yaml under
+        operator.profile. Each field is coerced to a stripped string, so a
+        missing key, None, or non-string value collapses to "".
+
+    Any read or parse failure yields an empty products list and the all-empty
+    profile dict, so a half-filled or deleted block never crashes a wake.
     """
     name = os.environ.get("OPERATOR_NAME", "your operator")
 
     products: list[dict] = []
+    profile = _empty_profile()
     try:
         with SETTINGS_FILE.open("r", encoding="utf-8") as f:
             settings = yaml.safe_load(f) or {}
         operator = settings.get("operator") or {}
+
         raw_products = operator.get("products") or []
         if isinstance(raw_products, list):
             products = [p for p in raw_products if isinstance(p, dict)]
+
+        raw_profile = operator.get("profile")
+        if isinstance(raw_profile, dict):
+            for key in profile:
+                profile[key] = str(raw_profile.get(key) or "").strip()
     except Exception:
         products = []
+        profile = _empty_profile()
 
-    return {"name": name, "products": products}
+    return {"name": name, "products": products, "profile": profile}
 
 
 def load_addendum_context() -> dict:

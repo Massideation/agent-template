@@ -15,12 +15,13 @@ EASTERN = ZoneInfo("America/New_York")
 from pathlib import Path
 from typing import Optional
 
+import httpx
 import yaml
 from dotenv import load_dotenv
 
 from src import executor, logger, memory, planner, revenue
 from src.emailer import send_operator_email
-from src.logger import StyleGuardRejected
+from src.logger import DISCLOSURE_FOOTER, StyleGuardRejected
 from src.memory import LastWake, State
 from src.openrouter_client import OpenRouterClient
 
@@ -28,6 +29,11 @@ from src.openrouter_client import OpenRouterClient
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SETTINGS_PATH = REPO_ROOT / "config" / "settings.yaml"
 ENV_PATH = REPO_ROOT / ".env"
+
+TELEGRAM_API = "https://api.telegram.org"
+
+# The treasury referral surfaced when confirmed revenue first crosses Level 2.
+STACK_TREASURY_URL = "https://app.stackit.ai/r/B7E3dE2f"
 
 # Level thresholds in confirmed USD, sourced from the Daily Wake addendum
 # section 4. Highest level whose requirement is met wins.
@@ -60,6 +66,47 @@ def _level_for_revenue(total_usd: float) -> int:
         if total_usd >= requirement and level > achieved:
             achieved = level
     return achieved
+
+
+def _send_telegram(token: str, chat_id: int, text: str) -> dict:
+    """Send one plain-text Telegram message. Raises on transport error.
+
+    Mirrors the helper in src/tasks/decide_next.py so wake.py can nudge the
+    operator without importing task internals. Callers wrap this in try/except
+    so a failure never fails the wake.
+    """
+    url = f"{TELEGRAM_API}/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "disable_web_page_preview": True,
+    }
+    resp = httpx.post(url, json=payload, timeout=15.0)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _build_confirm_block(pending: list) -> str:
+    """Build the operator-facing CONFIRM block for pending revenue claims.
+
+    Plain text, no em dashes. One bullet per pending entry. Returns "" when
+    the list is empty so callers can treat falsy as nothing-to-surface.
+    """
+    if not pending:
+        return ""
+    lines = ["Your agent recorded possible revenue:"]
+    for entry in pending:
+        try:
+            amount = float(getattr(entry, "amount_usd", 0.0))
+        except (TypeError, ValueError):
+            amount = 0.0
+        rev_id = str(getattr(entry, "id", "")).strip()
+        source = str(getattr(entry, "source", "")).strip()
+        lines.append(f"- {rev_id} ${amount:.2f} {source}".rstrip())
+    lines.append(
+        'Reply "confirm <id>" to count it, or "reject <id>" to discard.'
+    )
+    return "\n".join(lines)
 
 
 def _build_client(
@@ -149,24 +196,58 @@ def main() -> int:
             outcome=outcome_text,
         )
 
-        # 9. Update level from confirmed revenue.
+        # 9. Update level from confirmed revenue. Capture the previous level
+        # (from persisted state) before overwriting so we can detect a fresh
+        # crossing into Level 2 this wake and fire the Stack treasury CTA once.
+        previous_level = state.level.current_level
         total_confirmed = revenue.total_confirmed_usd()
         state.level.confirmed_revenue_usd = total_confirmed
-        state.level.current_level = _level_for_revenue(total_confirmed)
+        new_level = _level_for_revenue(total_confirmed)
+        state.level.current_level = new_level
+        crossed_into_level_2 = previous_level < 2 <= new_level
+
+        # 9a. Read the pending revenue ledger once. Used to surface a CONFIRM
+        # block in the daily email and a once-per-day Telegram nudge so a
+        # phone-only operator can confirm or reject without the CLI.
+        pending: list = []
+        try:
+            pending = revenue.list_pending()
+        except Exception as exc:
+            logger.write_private(
+                today,
+                f"revenue.list_pending failed: {type(exc).__name__}",
+            )
+        confirm_block = _build_confirm_block(pending)
 
         # 9b. Daily email digest to the operator (the agent's first hand).
-        # Send at most once per Eastern day, and only on a day the agent
-        # actually published something. A failed or unconfigured send never
-        # fails the wake; we log it to the private log and continue.
+        # Send at most once per Eastern day. Normally only on a day the agent
+        # published something, but when a pending revenue claim is waiting we
+        # also send on a quiet day so the operator can confirm or reject it.
+        # A failed or unconfigured send never fails the wake; we log it to the
+        # private log and continue.
         today_eastern = today
         public_summary = result.public_summary or ""
-        if public_summary.strip() and state.email.last_sent_date != today_eastern:
-            subject = f"Your agent posted today ({today_eastern})"
-            body_text = (
-                f"{public_summary}\n\n"
-                "Reply to your agent in the chat or on Telegram. "
-                "This is an automated daily note."
-            )
+        has_post = bool(public_summary.strip())
+        has_pending = bool(confirm_block)
+        if (has_post or has_pending) and state.email.last_sent_date != today_eastern:
+            if has_post:
+                subject = f"Your agent posted today ({today_eastern})"
+                body_parts = [
+                    public_summary,
+                    "",
+                    "Reply to your agent in the chat or on Telegram. "
+                    "This is an automated daily note.",
+                ]
+            else:
+                subject = f"Your agent recorded possible revenue ({today_eastern})"
+                body_parts = [
+                    "Your agent rested this hour but has revenue waiting for "
+                    "you to confirm.",
+                ]
+            if has_pending:
+                body_parts.append("")
+                body_parts.append(confirm_block)
+            body_text = "\n".join(body_parts)
             try:
                 outcome = send_operator_email(subject, body_text)
                 if outcome.get("sent"):
@@ -181,6 +262,61 @@ def main() -> int:
                     today_eastern,
                     f"email digest raised unexpectedly: {type(exc).__name__}",
                 )
+
+        # 9c. Telegram CONFIRM nudge for pending revenue. Gated to once per
+        # Eastern day via state.telegram.last_confirm_nudge_date so the same
+        # block is not resent every wake while items remain pending. Best
+        # effort: any failure is logged privately and never fails the wake.
+        token = os.environ.get("TELEGRAM_BOT_TOKEN")
+        chat_id = state.telegram.last_chat_id
+        if (
+            has_pending
+            and token
+            and chat_id is not None
+            and state.telegram.last_confirm_nudge_date != today_eastern
+        ):
+            try:
+                message = f"{confirm_block}\n\n{DISCLOSURE_FOOTER}"
+                _send_telegram(token, chat_id, message)
+                state.telegram.last_confirm_nudge_date = today_eastern
+            except Exception as exc:
+                logger.write_private(
+                    today_eastern,
+                    f"telegram confirm nudge failed: {type(exc).__name__}",
+                )
+
+        # 9d. Level 2 crossing. When confirmed revenue first reaches Level 2
+        # this wake, fire a dedicated operator-facing email and Telegram with
+        # the Stackit treasury referral. Both are best effort and independent
+        # of the daily-digest gate, because a level-up is a one-time event.
+        if crossed_into_level_2:
+            level_2_subject = f"Your agent reached Level 2 ({today_eastern})"
+            level_2_body = (
+                "Your agent reached Level 2 with real revenue. This is the "
+                "moment to give it a treasury. Open its Stackit wallet and "
+                f"treasury here:\n{STACK_TREASURY_URL}"
+            )
+            try:
+                outcome = send_operator_email(level_2_subject, level_2_body)
+                if not outcome.get("sent"):
+                    logger.write_private(
+                        today_eastern,
+                        f"level 2 email not sent: {outcome.get('reason', 'unknown')}",
+                    )
+            except Exception as exc:
+                logger.write_private(
+                    today_eastern,
+                    f"level 2 email raised unexpectedly: {type(exc).__name__}",
+                )
+            if token and chat_id is not None:
+                try:
+                    message = f"{level_2_body}\n\n{DISCLOSURE_FOOTER}"
+                    _send_telegram(token, chat_id, message)
+                except Exception as exc:
+                    logger.write_private(
+                        today_eastern,
+                        f"level 2 telegram failed: {type(exc).__name__}",
+                    )
 
         memory.save_state(state)
 

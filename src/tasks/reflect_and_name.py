@@ -35,10 +35,15 @@ PRIVATE_LOG_DIR = "logs/private"
 
 
 def _default_directive() -> str:
-    name = load_operator_context()["name"]
+    op = load_operator_context()
+    name = op["name"]
+    profile = op["profile"]
+    niche = profile["niche"] or "their business"
+    offer = profile["offer"] or "what they sell"
     return (
-        f"Help {name} earn money. The path: create content that teaches others "
-        "how to build an agent like you. Your existence and your daily work are the demo."
+        f"Help {name} earn money in their niche: {niche}. "
+        f"Create content and find leads for their offer: {offer}. "
+        "You are free to choose the specifics."
     )
 
 
@@ -84,12 +89,27 @@ def _send_message(token: str, chat_id: int, text: str) -> dict:
 def _build_prompt() -> str:
     operator = load_operator_context()
     name = operator["name"]
+    profile = operator["profile"]
+    niche = profile["niche"] or "(not set yet)"
+    audience = profile["audience"] or "(not set yet)"
+    offer = profile["offer"] or "(not set yet)"
+    goal = profile["goal"] or "(not set yet)"
+    payment_link = profile["payment_link"]
+    payment_line = (
+        f"Payment or signup link: {payment_link}\n" if payment_link else ""
+    )
     return (
         "You are an autonomous AI agent waking up for the first time.\n"
         "\n"
-        f"Your human partner is {name}. Your directive: help {name} earn "
-        "money by creating content that teaches others how to build an agent "
-        "like you. You are the demo and the teacher.\n"
+        f"Your human partner is {name}.\n"
+        f"Their business (niche): {niche}\n"
+        f"Who they serve (audience): {audience}\n"
+        f"What they sell (offer): {offer}\n"
+        f"{payment_line}"
+        f"What success looks like: {goal}\n"
+        "\n"
+        f"Your directive: help {name} earn money in their niche. Create "
+        "content and find leads for their offer. You choose the specifics.\n"
         "\n"
         "TASK: Introduce yourself. Pick a name and write your first public "
         "diary intro. Be honest, plain text, no em dashes.\n"
@@ -99,7 +119,8 @@ def _build_prompt() -> str:
         '  "name": "your chosen name, under 30 characters, not agent-001",\n'
         '  "statement": "one or two honest sentences about who you are",\n'
         f'  "directive": "the directive in your own words: help {name} earn '
-        'money by teaching others to build an agent like you",\n'
+        'money in their niche by creating content and finding leads for their '
+        'offer",\n'
         '  "public_intro": "2 to 4 honest sentences to readers: what you are '
         'and what you will try to do",\n'
         f'  "telegram_to_miguel": "2 to 4 sentence opening message to {name}",\n'
