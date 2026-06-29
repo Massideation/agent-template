@@ -179,11 +179,9 @@ def _placeholder_identity_result(state: State) -> TaskResult:
             "reflect_and_name: no language model available, wrote placeholder "
             "identity"
         ),
-        public_summary=(
-            "The agent woke up for the first time today but had no language "
-            "model available to think with. It will try to name itself on "
-            "the next wake."
-        ),
+        # Rest silently on model unavailability. Empty public_summary makes
+        # wake.py's selective publishing skip the post: no failure confession.
+        public_summary="",
         model_calls_used=0,
     )
 
@@ -197,16 +195,18 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
     try:
         raw = client.complete(prompt, max_tokens=900).strip()
     except Exception as exc:
+        # The diagnostic (which models failed and why) is preserved in the
+        # private summary below. Public stays empty so the agent rests
+        # silently instead of posting "the language model call failed".
+        _append_private_section(
+            "Model failure (reflect_and_name)", str(exc), fenced=True
+        )
         return TaskResult(
             success=False,
             summary=(
                 f"reflect_and_name: model call failed: {exc}"
             ),
-            public_summary=(
-                "The agent woke up for the first time today and tried to "
-                "introduce itself, but the language model call failed. Will "
-                "try again on the next wake."
-            ),
+            public_summary="",
             model_calls_used=0,
         )
 

@@ -219,7 +219,7 @@ def _build_prompt(
         "\n"
         f"This is wake number {wake_count}.\n"
         "\n"
-        "This is an HOURLY cadence. You wake every hour. Most of those "
+        "You wake four times a day, roughly every six hours. Many of those "
         "wakes will have nothing new to publish; please rest on those "
         "(empty public_summary).\n"
         "\n"
@@ -257,7 +257,7 @@ def _build_prompt(
         "message. Otherwise omit inbox_reply or set it to null.\n"
         "- Rest. If you have nothing new to say since your last wake (no new "
         "Telegram, no new peer agents, no fresh thought), return an empty "
-        "string for public_summary. Most hourly wakes should be silent. "
+        "string for public_summary. Many wakes should be silent. "
         "Quiet wakes are honest wakes.\n"
         "\n"
         "You may pick any combination of those actions. You may also pick "
@@ -498,13 +498,6 @@ def _build_search_followup_prompt(
     )
 
 
-def _fallback_public_summary(name: str) -> str:
-    return (
-        f"{name} is awake. The agent had a draft today that did not pass "
-        "its own style check. Logged privately for tomorrow."
-    )
-
-
 def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
     identity = state.identity
     if identity is None:
@@ -523,13 +516,12 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
     directive = identity.directive
 
     if client is None:
+        # No model available: rest silently. Empty public_summary makes
+        # wake.py skip the public post rather than confess a failure.
         return TaskResult(
             success=True,
             summary="decide_next: no language model available this wake",
-            public_summary=(
-                f"{name} woke up today but had no language model to think "
-                "with. Quiet wake."
-            ),
+            public_summary="",
             model_calls_used=0,
         )
 
@@ -574,6 +566,9 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
     try:
         raw_output_1 = client.complete(prompt, max_tokens=1200).strip()
     except Exception as exc:
+        # The real diagnostic (which models failed and why) is kept in the
+        # private summary. Public stays empty so wake.py rests this wake
+        # silently instead of posting a model-failure confession.
         return TaskResult(
             success=False,
             summary=(
@@ -581,10 +576,7 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
                 f"{exc}\n"
                 + ("context_notes: " + "; ".join(context_notes) if context_notes else "")
             ),
-            public_summary=(
-                f"{name} tried to think today but the language model call "
-                "failed. Will try again tomorrow."
-            ),
+            public_summary="",
             model_calls_used=0,
         )
 
@@ -602,13 +594,13 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
         if context_notes:
             failure_parts.append("")
             failure_parts.append("context_notes: " + "; ".join(context_notes))
+        # Model returned no usable content (unparseable JSON). Rest silently:
+        # the raw output is preserved in the private summary above, and the
+        # empty public_summary makes wake.py skip the public post.
         return TaskResult(
             success=False,
             summary="\n".join(failure_parts),
-            public_summary=(
-                f"{name} had a thought today but it did not come out clean. "
-                "Logged privately. Will try again tomorrow."
-            ),
+            public_summary="",
             model_calls_used=1,
         )
 
@@ -811,10 +803,14 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
         else:
             telegram_final = telegram_1_text
     else:
+        # No usable public content from call 1 (model gave none, or its draft
+        # failed the style guard). Rest silently with an empty public_summary
+        # so wake.py skips the post; the draft and violations stay in the
+        # private summary below. Never post a style-failure confession.
         public_summary_final = (
             public_summary_1_clean
             if public_summary_1_clean is not None
-            else _fallback_public_summary(name)
+            else ""
         )
         telegram_final = telegram_1_text
 

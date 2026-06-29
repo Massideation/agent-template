@@ -8,9 +8,14 @@ every model returns HTTP 429.
 
 from __future__ import annotations
 
+import logging
+
 import httpx
 
 from src.memory import QuotaState
+
+
+logger = logging.getLogger(__name__)
 
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -37,10 +42,15 @@ class OpenRouterClient:
     def complete(self, prompt: str, max_tokens: int = 1000) -> str:
         """Run a chat completion against the configured models in order.
 
+        Tries every configured model in turn, moving to the next on ANY
+        failure: a transport error (timeout, connection drop), HTTP 429, any
+        other non-200 status, or a 200 with an empty/unparseable body. The
+        first model that returns usable text wins. Only when every model has
+        failed does this raise QuotaExhausted, with a message summarising the
+        real per-model failures so the private log shows true diagnostics.
+
         Decrements quota_state.calls_made before each attempt. Raises
-        QuotaExhausted if the local counter is already at the limit, or if
-        every configured model returns HTTP 429 or an empty success body.
-        Returns the assistant's text content on first success.
+        QuotaExhausted immediately if the local counter is already spent.
         """
         if not self.models:
             raise QuotaExhausted("no models configured")
@@ -50,11 +60,18 @@ class OpenRouterClient:
             "Content-Type": "application/json",
         }
 
-        all_rate_limited = True
+        # One human-readable diagnostic per attempted model, e.g.
+        # "meta-llama/...:free -> HTTP 429". Surfaced on total failure.
+        failures: list[str] = []
 
         for model in self.models:
             if self.quota_state.calls_made >= self.quota_state.calls_limit:
-                raise QuotaExhausted("local quota counter exhausted")
+                # Local budget spent. Report it together with whatever we
+                # already learned this call so the log is not just "exhausted".
+                detail = "; ".join(failures) if failures else "no attempts made"
+                raise QuotaExhausted(
+                    f"local quota counter exhausted ({detail})"
+                )
 
             self.quota_state.calls_made += 1
 
@@ -71,26 +88,61 @@ class OpenRouterClient:
                     json=payload,
                     timeout=DEFAULT_TIMEOUT_SECONDS,
                 )
-            except httpx.HTTPError:
-                all_rate_limited = False
+            except httpx.HTTPError as exc:
+                reason = f"transport error: {type(exc).__name__}: {exc}"
+                failures.append(f"{model} -> {reason}")
+                logger.warning("openrouter model %s failed: %s", model, reason)
                 continue
 
-            if response.status_code == 429:
-                continue
-
-            if response.status_code >= 400:
-                all_rate_limited = False
+            if response.status_code != 200:
+                reason = f"HTTP {response.status_code}"
+                body = _error_snippet(response)
+                if body:
+                    reason = f"{reason}: {body}"
+                failures.append(f"{model} -> {reason}")
+                logger.warning("openrouter model %s failed: %s", model, reason)
                 continue
 
             text = _extract_text(response)
             if text:
+                if failures:
+                    logger.info(
+                        "openrouter model %s succeeded after %d failure(s)",
+                        model,
+                        len(failures),
+                    )
                 return text
 
-            all_rate_limited = False
+            reason = "empty or unparseable response body"
+            failures.append(f"{model} -> {reason}")
+            logger.warning("openrouter model %s failed: %s", model, reason)
 
-        if all_rate_limited:
-            raise QuotaExhausted("all configured models returned 429")
-        raise QuotaExhausted("no model returned usable content")
+        summary = "; ".join(failures) if failures else "no models attempted"
+        raise QuotaExhausted(f"all models failed: {summary}")
+
+
+def _error_snippet(response: httpx.Response, max_len: int = 200) -> str:
+    """Best-effort short description of a non-200 body for diagnostics.
+
+    Prefers OpenRouter's JSON {"error": {"message": ...}} shape, falls back
+    to raw text. Always returns a trimmed, length-capped string and never
+    raises, so it is safe to call on any failed response.
+    """
+    try:
+        data = response.json()
+    except ValueError:
+        snippet = (response.text or "").strip()
+        return snippet[:max_len]
+
+    if isinstance(data, dict):
+        err = data.get("error")
+        if isinstance(err, dict):
+            message = err.get("message")
+            if isinstance(message, str) and message.strip():
+                return message.strip()[:max_len]
+        if isinstance(err, str) and err.strip():
+            return err.strip()[:max_len]
+    return str(data)[:max_len]
 
 
 def _extract_text(response: httpx.Response) -> str:

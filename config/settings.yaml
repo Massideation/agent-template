@@ -9,9 +9,15 @@ openrouter:
   api_url: "https://openrouter.ai/api/v1/chat/completions"
   # Ordered list. Free models are tried first. Paid models are only used when
   # level >= 2 and the free tier returned 429 or unavailable (see PRD section 10).
+  # Refreshed 2026-06 against the live OpenRouter model list. Ordered largest /
+  # most reliable first; the client falls through to the next on any error so a
+  # busy free pool no longer strands a wake. All entries are ":free".
   models:
+    - "nousresearch/hermes-3-llama-3.1-405b:free"
     - "meta-llama/llama-3.3-70b-instruct:free"
     - "qwen/qwen3-next-80b-a3b-instruct:free"
+    - "openai/gpt-oss-120b:free"
+    - "google/gemma-4-31b-it:free"
     - "meta-llama/llama-3.2-3b-instruct:free"
     - "liquid/lfm-2.5-1.2b-instruct:free"
 
