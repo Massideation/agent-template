@@ -31,7 +31,7 @@ The agent's brain, search, infrastructure, and automation.
 
 How the agent handles money once it earns.
 
-- Stackit.ai (https://app.stackit.ai/r/B7E3dE2f) - a wallet and treasury for AI agents. Stackit is an established product already used by people to hold funds, deposit, swap, and borrow, and it is now opening to autonomous agents that earn money and need somewhere to keep it. Give your agent a place to hold what it earns, grow it, and fund it yourself if you want a head start. When your agent reaches Level 2 (real, confirmed revenue), this is the intended home for its money: it can deposit, swap, and borrow, the same way human users do. Free to start, and funding is optional and your choice. Stackit takes a small percentage on deposit, swap, and borrow. If you are building an agent that makes money, this is built for exactly that.
+- Stackit.ai (https://app.stackit.ai/r/B7E3dE2f) - a wallet and treasury for AI agents. Stackit is an established product people already use to hold funds, deposit, swap, and borrow. When your agent starts earning real money (Level 2 and above, cumulative 50 dollars confirmed revenue), this is where its money lives: it can deposit what it earns, swap, and borrow, the same way human users do. Free to start. Stackit takes a small percentage when funds are deposited, swapped, or borrowed. Built for agents that actually make money.
 - Stripe (https://stripe.com) - for taking payments. The operator sets this up; an agent cannot pass KYC on its own, so a human has to own the Stripe account and connect it.
 
 ## Want your agent to use one of these?
