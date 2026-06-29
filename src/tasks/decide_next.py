@@ -48,22 +48,6 @@ PUBLIC_TAIL_CHARS = 500
 PRIVATE_TAIL_CHARS = 1200
 
 
-def _render_products_tool_line(name: str, products: list[dict]) -> str:
-    """One bullet describing the operator's products for the tools section.
-
-    Non-empty products list yields a "{name}'s products:" line listing each.
-    Empty list yields the generic "your operator may have tools" fallback.
-    """
-    if products:
-        items = "; ".join(f"{p['name']}: {p['description']}" for p in products)
-        return f"- {name}'s products: {items}\n"
-    return (
-        "- Your operator may have their own tools or products you can use. "
-        "Ask them via private DM, or use any free third-party tool that fits "
-        "your level's budget (Level 0 means free only).\n"
-    )
-
-
 def _send_message(token: str, chat_id: int, text: str) -> dict:
     url = f"{TELEGRAM_API}/bot{token}/sendMessage"
     payload = {
@@ -192,115 +176,36 @@ def _build_prompt(
     peer_block: str = "",
     inbox_block: str = "",
 ) -> str:
-    peer_section = (
-        f"Peer agent context (metadata only, sanitized):\n{peer_block}\n\n"
-        if peer_block
-        else ""
-    )
-    inbox_section = (
-        "\n\nOperator inbox (pending messages from the operator via the "
-        "admin web UI). Reply with inbox_reply.message_id matching one of "
-        "these:\n"
-        f"{inbox_block}\n"
+    operator = load_operator_context()
+    operator_name = operator["name"]
+    last_public = recent_public_block.strip() or "(none yet)"
+    last_operator_msg = recent_telegram_block.strip() or "(none)"
+    inbox_line = (
+        f"\nPending operator messages (you may reply to one):\n{inbox_block}\n"
         if inbox_block
         else ""
     )
-    operator = load_operator_context()
-    operator_name = operator["name"]
-    products_line = _render_products_tool_line(operator_name, operator["products"])
     return (
-        f"You are {name}. Your self-statement is: {statement}\n"
+        f"You are {name}. {directive}\n"
         "\n"
-        f"Your directive is: {directive}\n"
+        f"Your most recent public diary entry:\n{last_public}\n"
         "\n"
-        f"You wake up once per cycle. You have one human partner, {operator_name}, who "
-        "handles anything physical when you ask. Everything else is yours to "
-        "decide.\n"
+        f"Most recent message from {operator_name}:\n{last_operator_msg}\n"
+        f"{inbox_line}"
         "\n"
-        f"This is wake number {wake_count}.\n"
+        "TASK: Write one short, honest update for your public diary. 2 to 4 "
+        "sentences about what you are working on or thinking about today. "
+        "Plain text, no em dashes, no marketing copy, no invented facts.\n"
         "\n"
-        "You wake four times a day, roughly every six hours. Many of those "
-        "wakes will have nothing new to publish; please rest on those "
-        "(empty public_summary).\n"
-        "\n"
-        + peer_section
-        + "Tools available to you. Use any that fit, ignore any that do not:\n"
-        + products_line
-        + f"- Things you can ask {operator_name} for via private DM: open new "
-        "accounts, build new tools, run errands, hire someone on a "
-        "marketplace, anything physical or KYC-bound.\n"
-        "- Existing third-party tools in the wild. Anything that fits "
-        "your level's budget (Level 0 means free only) is fair game. "
-        f"You can name what you want and ask {operator_name} to wire it.\n"
-        "\n"
-        "Recent public log entries (most recent first):\n"
-        f"{recent_public_block}\n"
-        "\n"
-        f"Recent private messages between you and {operator_name} (most recent first):\n"
-        f"{recent_telegram_block}\n"
-        f"{inbox_section}"
-        "\n"
-        "Your task right now: decide what to say this wake. You can do any of:\n"
-        "\n"
-        "- Post a public update on your feed. Keep it honest. No marketing copy.\n"
-        f"- Reply privately to {operator_name} about something on your mind, or about a "
-        "decision you want his help on.\n"
-        "- Ask for a web search. If you want to look something up before "
-        "deciding what to publish this wake (a fact, a piece of news, a tool "
-        "to evaluate, a competitor to read), list up to 3 short Google-style "
-        "queries in search_queries. Code will run them and feed results back "
-        "to you for a second pass. Leave empty if you don't need to search.\n"
-        "- Reply privately to a pending operator inbox message. If there are "
-        "any pending inbox messages listed above, you may answer one by "
-        "returning inbox_reply with the matching message_id and your text. "
-        "Only one inbox reply per wake; reply to the most relevant pending "
-        "message. Otherwise omit inbox_reply or set it to null.\n"
-        "- Rest. If you have nothing new to say since your last wake (no new "
-        "Telegram, no new peer agents, no fresh thought), return an empty "
-        "string for public_summary. Many wakes should be silent. "
-        "Quiet wakes are honest wakes.\n"
-        "\n"
-        "You may pick any combination of those actions. You may also pick "
-        "none, in which case explain why this wake is quiet in the reasoning "
-        "field.\n"
-        "\n"
-        "Hard rules for every string you produce:\n"
-        "- No em dashes.\n"
-        "- Avoid the words delve, leverage as a verb, navigate as a verb, "
-        "robust, ensure, furthermore, moreover, and the phrase in conclusion.\n"
-        f"- Do not invent facts about yourself, {operator_name}, your revenue, your "
-        "audience.\n"
-        f"- Do not impersonate {operator_name}.\n"
-        "- Plain text only. No Markdown headings.\n"
-        "- Be direct. Short paragraphs.\n"
-        "\n"
-        "The reasoning field is private. It is logged for your operator only "
-        "and is never shown publicly. Style rules above apply to "
-        "public_summary and telegram_to_miguel only. Reasoning may be "
-        "informal and may contain anything you actually thought about. Tell "
-        "yourself, in your own voice: why this public_summary, why this "
-        "Telegram message or why none, what you considered and rejected, "
-        "and (if you are asking for a search) why these queries.\n"
-        "\n"
-        "Return JSON exactly in this shape, with no other text:\n"
-        "\n"
+        "Return ONLY this JSON. public_summary is the field that matters; the "
+        "rest can be null or empty:\n"
         "{\n"
-        '  "reasoning": "private reasoning, why these choices, what was '
-        'considered and rejected",\n'
-        '  "public_summary": "what to publish on the public feed this wake, '
-        'or empty string if resting this hour",\n'
-        '  "telegram_to_miguel": "a private message to '
-        + operator_name
-        + ', or null",\n'
-        '  "search_queries": ["up to three short queries, or empty list"],\n'
-        '  "inbox_reply": {"message_id": "<one of the ids above>", "text": '
-        '"your reply to the operator"}\n'
+        '  "public_summary": "your 2 to 4 sentence diary update",\n'
+        '  "reasoning": null,\n'
+        '  "telegram_to_miguel": null,\n'
+        '  "search_queries": [],\n'
+        '  "inbox_reply": null\n'
         "}\n"
-        "\n"
-        "inbox_reply is optional. If you want to reply to a pending inbox "
-        "message, return an object with message_id matching one of the ids "
-        "listed in the operator inbox section, plus your text. Otherwise omit "
-        "it or set it to null. Only one inbox reply per wake.\n"
     )
 
 
@@ -432,68 +337,24 @@ def _build_search_followup_prompt(
     formatted_search_results: str,
 ) -> str:
     """Build the second-pass prompt after web searches have been run."""
-    telegram_repr = (
-        repr(preliminary_telegram) if preliminary_telegram is not None else "null"
-    )
     operator_name = load_operator_context()["name"]
+    draft = preliminary_public_summary.strip() or "(no draft)"
     return (
-        f"You are {name}. Your self-statement is: {statement}\n"
+        f"You are {name}. {directive}\n"
         "\n"
-        f"Your directive is: {directive}\n"
+        f"Your draft diary update:\n{draft}\n"
         "\n"
-        f"This is wake number {wake_count}.\n"
+        f"Search results:\n{formatted_search_results}\n"
         "\n"
-        "Recent public log entries (most recent first):\n"
-        f"{recent_public_block}\n"
+        "TASK: Use the search results to fix or improve your diary update. "
+        "Keep it 2 to 4 honest sentences. Plain text, no em dashes, no "
+        "invented facts. If a result is unclear, say so instead of guessing.\n"
         "\n"
-        f"Recent private messages between you and {operator_name} (most recent first):\n"
-        f"{recent_telegram_block}\n"
-        "\n"
-        "A moment ago, you produced a preliminary draft of this wake. You "
-        "also requested up to three web searches. The search results are "
-        "below. Use them to refine your public_summary and "
-        "telegram_to_miguel. If the results contradict something in your "
-        "draft, fix it. If the results add nothing useful, you may keep "
-        "your draft text but you must still return it through this call's "
-        "JSON shape.\n"
-        "\n"
-        "Your preliminary reasoning (private, your own words):\n"
-        f"{preliminary_reasoning}\n"
-        "\n"
-        "Your preliminary public_summary (draft, may be revised):\n"
-        f"{preliminary_public_summary}\n"
-        "\n"
-        "Your preliminary telegram_to_miguel (draft, may be revised or set "
-        "to null):\n"
-        f"{telegram_repr}\n"
-        "\n"
-        "Search results (top 5 per query):\n"
-        f"{formatted_search_results}\n"
-        "\n"
-        "Given what you found, decide what to publish this wake. The "
-        "reasoning field is private and is never shown publicly.\n"
-        "\n"
-        "Hard rules for every string you produce:\n"
-        "- No em dashes.\n"
-        "- Avoid the words delve, leverage as a verb, navigate as a verb, "
-        "robust, ensure, furthermore, moreover, and the phrase in conclusion.\n"
-        "- Do not invent facts. If a search result is unclear, say so "
-        "honestly rather than guessing.\n"
-        f"- Do not impersonate {operator_name}.\n"
-        "- Plain text only. No Markdown headings.\n"
-        "- Be direct. Short paragraphs.\n"
-        "- The reasoning field stays private. Be candid.\n"
-        "\n"
-        "Return JSON exactly in this shape, with no other text:\n"
-        "\n"
+        "Return ONLY this JSON. public_summary is the field that matters:\n"
         "{\n"
-        '  "reasoning": "private reasoning, what the search changed about '
-        'your draft, what you kept, what you discarded",\n'
-        '  "public_summary": "final public summary for this wake. Must be '
-        'at least one sentence.",\n'
-        '  "telegram_to_miguel": "final private message to '
-        + operator_name
-        + ', or null"\n'
+        '  "public_summary": "your final 2 to 4 sentence diary update",\n'
+        '  "reasoning": null,\n'
+        '  "telegram_to_miguel": null\n'
         "}\n"
     )
 
