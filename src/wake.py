@@ -7,6 +7,7 @@ See also docs/PRD_ADDENDUM_daily_wake.md for level thresholds.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -19,7 +20,7 @@ import httpx
 import yaml
 from dotenv import load_dotenv
 
-from src import executor, logger, memory, planner, revenue
+from src import executor, logger, memory, planner, revenue, style_guard
 from src.emailer import send_operator_email
 from src.logger import DISCLOSURE_FOOTER, StyleGuardRejected
 from src.memory import LastWake, State
@@ -29,6 +30,23 @@ from src.openrouter_client import OpenRouterClient
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SETTINGS_PATH = REPO_ROOT / "config" / "settings.yaml"
 ENV_PATH = REPO_ROOT / ".env"
+
+# Public persona file. Mirrored into the diary repo next to the logs so the
+# public profile page can read it. Lives at the agent repo root.
+PERSONA_PATH = REPO_ROOT / "logs" / "public" / "persona.json"
+PUBLIC_LOG_DIR = REPO_ROOT / "logs" / "public"
+
+# Safe accent palette, mirrored from the Presentation model in the plan. The
+# page only ever maps one of these keys to a fixed color, so re-validating here
+# means a hand-edited identity.json cannot poison the page with a raw value.
+SAFE_ACCENT_COLORS = [
+    "blue", "green", "purple", "orange", "pink", "teal", "red", "gold",
+]
+DEFAULT_ACCENT = "blue"
+DEFAULT_EMOJI = "*"
+# Static fallback for current_focus when no clean summary is available and no
+# prior persona.json exists. No em dashes.
+DEFAULT_FOCUS = "Waking up and finding my footing."
 
 TELEGRAM_API = "https://api.telegram.org"
 
@@ -128,6 +146,182 @@ def _build_client(
         models=list(models),
         quota_state=state.quota,
     )
+
+
+def _is_clean(text: str) -> bool:
+    """True when text is non-empty and passes the style guard."""
+    if not text or not text.strip():
+        return False
+    try:
+        return not style_guard.check(text)
+    except Exception:
+        # If the guard itself misbehaves, treat the text as not clean rather
+        # than risk publishing a flagged line.
+        return False
+
+
+def _read_prior_persona() -> dict:
+    """Return the previously written persona.json as a dict, or empty dict."""
+    try:
+        if PERSONA_PATH.exists():
+            with PERSONA_PATH.open("r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        pass
+    return {}
+
+
+def _presentation_fields(state: State) -> dict:
+    """Pull presentation fields off the identity with safe defaults.
+
+    Works whether or not Identity carries a presentation sub-model yet, so this
+    degrades cleanly before Part A lands and picks the real values up after.
+    """
+    fields = {
+        "tagline": "",
+        "accent_color": DEFAULT_ACCENT,
+        "emoji": DEFAULT_EMOJI,
+        "vibe": "",
+    }
+    identity = getattr(state, "identity", None)
+    if identity is None:
+        return fields
+    pres = getattr(identity, "presentation", None)
+    if pres is None:
+        return fields
+
+    tagline = str(getattr(pres, "tagline", "") or "").strip()
+    if tagline and _is_clean(tagline):
+        fields["tagline"] = tagline
+
+    accent = str(getattr(pres, "accent_color", "") or "").strip().lower()
+    fields["accent_color"] = accent if accent in SAFE_ACCENT_COLORS else DEFAULT_ACCENT
+
+    emoji = str(getattr(pres, "emoji", "") or "").strip()
+    fields["emoji"] = emoji[0] if emoji else DEFAULT_EMOJI
+
+    vibe = str(getattr(pres, "vibe", "") or "").strip()
+    if vibe:
+        fields["vibe"] = vibe
+
+    return fields
+
+
+def _latest_public_entry(today_summary: str, today_date: str) -> Optional[dict]:
+    """Return {date, text} for the newest public diary excerpt, or None.
+
+    Prefers this wake's public_summary. On a rest wake (empty summary) it reads
+    the newest logs/public/<date>.md and excerpts the last entry. Text is capped
+    and style-checked so a flagged line never lands in the public file.
+    """
+    if _is_clean(today_summary):
+        return {"date": today_date, "text": today_summary.strip()[:400]}
+
+    try:
+        if not PUBLIC_LOG_DIR.exists():
+            return None
+        logs = sorted(
+            (p for p in PUBLIC_LOG_DIR.glob("*.md") if p.stem != "persona"),
+            key=lambda p: p.stem,
+            reverse=True,
+        )
+        for log_path in logs:
+            raw = log_path.read_text(encoding="utf-8")
+            # Entries are separated by a "---" rule. Take the last block and
+            # strip its heading and the disclosure footer.
+            blocks = [b.strip() for b in raw.split("\n---\n") if b.strip()]
+            if not blocks:
+                continue
+            last = blocks[-1]
+            lines = [
+                ln for ln in last.splitlines()
+                if ln.strip()
+                and not ln.lstrip().startswith("#")
+                and "autonomous AI agent" not in ln
+            ]
+            text = " ".join(lines).strip()[:400]
+            if _is_clean(text):
+                return {"date": log_path.stem, "text": text}
+        return None
+    except Exception:
+        return None
+
+
+def _resolve_focus(today_summary: str, prior: dict) -> str:
+    """Pick current_focus: clean summary, then prior file, then static default."""
+    if _is_clean(today_summary):
+        return today_summary.strip()[:400]
+    prior_focus = str(prior.get("current_focus") or "").strip()
+    if prior_focus and _is_clean(prior_focus):
+        return prior_focus
+    return DEFAULT_FOCUS
+
+
+def write_persona(
+    state: State,
+    public_summary: str,
+    today_date: str,
+    audio_url: Optional[str],
+) -> Optional[Path]:
+    """Write the public persona.json. Never raises; returns the path or None.
+
+    Reads identity + presentation + the latest public log, re-validates every
+    untrusted field (accent palette, single-char emoji, style guard on focus and
+    excerpt), and writes one JSON file atomically. Called every wake so the page
+    stays fresh even on a rest wake.
+    """
+    try:
+        prior = _read_prior_persona()
+        pres = _presentation_fields(state)
+
+        identity = getattr(state, "identity", None)
+        name = str(getattr(identity, "name", "") or "").strip() if identity else ""
+        if not name:
+            name = "unnamed"
+
+        try:
+            level = int(state.level.current_level)
+        except Exception:
+            level = 0
+        try:
+            wake_count = int(state.wake_count)
+        except Exception:
+            wake_count = 0
+
+        current_focus = _resolve_focus(public_summary, prior)
+        latest_entry = _latest_public_entry(public_summary, today_date)
+        if latest_entry is None and isinstance(prior.get("latest_entry"), dict):
+            # Keep the last good entry rather than blanking the page on a rest
+            # wake with no readable history.
+            latest_entry = prior["latest_entry"]
+
+        payload: dict = {
+            "name": name,
+            "tagline": pres["tagline"],
+            "accent_color": pres["accent_color"],
+            "emoji": pres["emoji"],
+            "vibe": pres["vibe"],
+            "level": level,
+            "wake_count": wake_count,
+            "current_focus": current_focus,
+            "latest_entry": latest_entry,
+            "audio_url": audio_url if (audio_url and str(audio_url).strip()) else None,
+            "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+
+        # Optional repo coordinates so a fork's page reads the right contents
+        # API path with zero manual HTML edits. Absent env leaves it off.
+        owner = (os.environ.get("FEED_REPO_OWNER") or "").strip()
+        repo_name = (os.environ.get("FEED_REPO_NAME") or "").strip()
+        if owner and repo_name:
+            payload["repo"] = f"{owner}/{repo_name}"
+
+        memory._atomic_write_json(PERSONA_PATH, payload)
+        return PERSONA_PATH
+    except Exception:
+        return None
 
 
 def main() -> int:
@@ -321,6 +515,37 @@ def main() -> int:
                         today_eastern,
                         f"level 2 telegram failed: {type(exc).__name__}",
                     )
+
+        # 9e. Optional voice clip, then publish the public persona.json. Both
+        # are best effort: any failure is logged privately and never fails the
+        # wake. persona.json is written every wake so the page's level, wake
+        # count, and focus stay fresh even on a rest wake. The voice module is
+        # imported lazily and guarded so the wake runs fine before it lands.
+        audio_url: Optional[str] = None
+        if public_summary.strip():
+            try:
+                from src import voice  # type: ignore
+
+                audio_url = voice.synthesize(
+                    public_summary,
+                    getattr(state.identity, "presentation", None)
+                    if state.identity
+                    else None,
+                    today_eastern,
+                )
+            except Exception as exc:
+                logger.write_private(
+                    today_eastern,
+                    f"voice.synthesize unavailable or raised: {type(exc).__name__}",
+                )
+
+        try:
+            write_persona(state, public_summary, today_eastern, audio_url)
+        except Exception as exc:
+            logger.write_private(
+                today_eastern,
+                f"write_persona raised: {type(exc).__name__}",
+            )
 
         memory.save_state(state)
 

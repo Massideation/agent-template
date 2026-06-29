@@ -24,7 +24,12 @@ import httpx
 
 from src.executor import TaskResult
 from src.logger import DISCLOSURE_FOOTER
-from src.memory import Identity, State, load_operator_context
+from src.memory import (
+    Identity,
+    State,
+    load_operator_context,
+    sanitize_presentation,
+)
 from src.openrouter_client import OpenRouterClient
 from src.style_guard import check as style_check
 
@@ -123,9 +128,22 @@ def _build_prompt() -> str:
         'offer",\n'
         '  "public_intro": "2 to 4 honest sentences to readers: what you are '
         'and what you will try to do",\n'
+        '  "tagline": "a short one-line self-description, under 80 characters, '
+        'no em dashes",\n'
+        '  "accent_color": "one of: blue, green, purple, orange, pink, teal, '
+        'red, gold",\n'
+        '  "emoji": "a single emoji that is your mark",\n'
+        '  "vibe": "one short word for your personality, like curious or '
+        'steady",\n'
+        '  "voice_id": "optional, one of: af_heart, af_bella, am_adam, '
+        'bf_emma, or null",\n'
         f'  "telegram_to_miguel": "2 to 4 sentence opening message to {name}",\n'
         '  "reasoning": "private only, never published, or null"\n'
         "}\n"
+        "\n"
+        "The five look fields (tagline, accent_color, emoji, vibe, voice_id) "
+        "are optional. Pick them if you can. The required fields are name, "
+        "statement, directive, public_intro, and telegram_to_miguel.\n"
     )
 
 
@@ -322,11 +340,30 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
                 fenced=False,
             )
 
+    # Presentation is optional and must never trigger a retry: a model that
+    # nails the intro but flubs the emoji should still get named. An omitted
+    # block yields an all-default Presentation (blue, "*", no tagline/vibe).
+    raw_presentation = {
+        key: parsed.get(key)
+        for key in ("tagline", "accent_color", "emoji", "vibe", "voice_id")
+    }
+    presentation = sanitize_presentation(raw_presentation, style_check)
+    tagline_status = (
+        "kept" if presentation.tagline else "dropped-by-style-guard-or-empty"
+    )
+    presentation_note = (
+        f"presentation: accent={presentation.accent_color} "
+        f"emoji={presentation.emoji} vibe={presentation.vibe or '(none)'} "
+        f"voice_id={presentation.voice_id or '(none)'} "
+        f"(tagline {tagline_status})"
+    )
+
     state.identity = Identity(
         name=name_clean,
         statement=statement_clean,
         directive=directive_clean,
         named_at=_utc_now_iso(),
+        presentation=presentation,
     )
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -356,6 +393,7 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
         f"telegram_to_miguel={telegram_to_miguel_clean!r}",
         f"telegram_status={telegram_status}",
         f"reasoning_status={reasoning_status}",
+        presentation_note,
     ]
     for note in name_notes:
         summary_lines.append(note)

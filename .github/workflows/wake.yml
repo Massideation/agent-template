@@ -1,9 +1,11 @@
-name: agent wake
+name: agent-001 wake
 
-# Default: 4 wakes/day. Times are in UTC because GitHub Actions cron is UTC.
-# 0,6,12,18 UTC keeps a fresh free OpenRouter account (about 50 calls/day)
-# comfortably under quota. Change to '0 * * * *' for hourly if you have credit
-# on file. GitHub Actions cron may drift by several minutes under load.
+# 4x/day cron: Luca wakes at 00:00, 06:00, 12:00, and 18:00 UTC. This matches
+# the documented 4x/day cadence and stops the hourly hammering of the shared
+# free OpenRouter pool that was causing 429 storms. Selective publishing in
+# decide_next means most wakes are silent in the public diary; only wakes with
+# something new to say produce a public log entry.
+# GitHub Actions cron may drift by several minutes under load.
 on:
   schedule:
     - cron: '0 0,6,12,18 * * *'
@@ -22,7 +24,7 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Checkout agent
+      - name: Checkout agent-001
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
@@ -32,25 +34,29 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install agent
+      - name: Install agent-001
         run: pip install -e .
 
       - name: Run one wake
         env:
+          OPERATOR_NAME: Miguel
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          FEED_ISSUE_TOKEN: ${{ secrets.FEED_ISSUE_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          OPERATOR_NAME: ${{ vars.OPERATOR_NAME }}
-          FEED_REPO_OWNER: ${{ vars.FEED_REPO_OWNER }}
-          FEED_REPO_NAME: ${{ vars.FEED_REPO_NAME }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           OPERATOR_EMAIL: ${{ vars.OPERATOR_EMAIL }}
           EMAIL_FROM: ${{ vars.EMAIL_FROM }}
+          # Optional voice unlock. Absent variable / secret -> empty -> off.
+          VOICE_ENABLED: ${{ vars.VOICE_ENABLED }}
+          HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
+          # Optional TTS model override. Empty -> module default (Kokoro).
+          HF_TTS_MODEL: ${{ vars.HF_TTS_MODEL }}
         run: python -m src.wake
 
-      - name: Commit state changes back to agent repo
+      - name: Commit state changes back to agent-001
         run: |
-          git config user.name 'agent'
-          git config user.email 'agent@users.noreply.github.com'
+          git config user.name 'agent-001'
+          git config user.email 'agent-001@users.noreply.github.com'
           git add state memory ledger logs
           if git diff --cached --quiet; then
             echo "No state changes to commit."
@@ -59,37 +65,59 @@ jobs:
             git push
           fi
 
-      - name: Mirror today's public log to the public diary repo
+      - name: Mirror today's public log and persona to agent-grows-up
         if: always()
-        env:
-          FEED_GITHUB_TOKEN: ${{ secrets.FEED_GITHUB_TOKEN }}
-          FEED_REPO_OWNER: ${{ vars.FEED_REPO_OWNER }}
-          FEED_REPO_NAME: ${{ vars.FEED_REPO_NAME }}
         run: |
           TODAY=$(TZ='America/New_York' date +%F)
           PUBLIC_LOG="logs/public/${TODAY}.md"
 
-          if [ ! -f "$PUBLIC_LOG" ]; then
-            echo "No public log produced today (${TODAY}). Nothing to mirror."
-            exit 0
-          fi
+          mkdir -p ~/.ssh
+          echo "${{ secrets.FEED_DEPLOY_KEY }}" > ~/.ssh/feed_key
+          chmod 600 ~/.ssh/feed_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
 
-          if [ -z "${FEED_GITHUB_TOKEN}" ] || [ -z "${FEED_REPO_OWNER}" ] || [ -z "${FEED_REPO_NAME}" ]; then
-            echo "Public diary mirror is not configured (needs FEED_GITHUB_TOKEN secret and FEED_REPO_OWNER / FEED_REPO_NAME variables). Skipping."
-            exit 0
-          fi
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/feed_key -o IdentitiesOnly=yes -o UserKnownHostsFile=~/.ssh/known_hosts"
 
-          git clone "https://x-access-token:${FEED_GITHUB_TOKEN}@github.com/${FEED_REPO_OWNER}/${FEED_REPO_NAME}.git" /tmp/feed
+          git clone git@github.com:Massideation/agent-grows-up.git /tmp/feed
           mkdir -p /tmp/feed/logs/public
-          cp "$PUBLIC_LOG" "/tmp/feed/logs/public/${TODAY}.md"
+
+          # Today's public log, if there is one. A rest wake produces no log,
+          # but persona.json still mirrors below so the page stays fresh.
+          if [ -f "$PUBLIC_LOG" ]; then
+            cp "$PUBLIC_LOG" "/tmp/feed/logs/public/${TODAY}.md"
+          else
+            echo "No public log produced today (${TODAY}). Mirroring persona only."
+          fi
+
+          # persona.json drives the public profile page. Lives next to the logs.
+          if [ -f logs/public/persona.json ]; then
+            cp logs/public/persona.json /tmp/feed/logs/public/persona.json
+          fi
+
+          # Optional voice clips for today.
+          if [ -d logs/public/audio ]; then
+            mkdir -p /tmp/feed/logs/public/audio
+            cp logs/public/audio/* /tmp/feed/logs/public/audio/ 2>/dev/null || true
+          fi
+
+          # Seed the persona page into a fresh diary repo (template forks only).
+          # agent-grows-up already carries these, so the guards make it a no-op.
+          if [ ! -f /tmp/feed/index.html ] && [ -f site/index.html ]; then
+            cp site/index.html /tmp/feed/index.html
+          fi
+          if [ ! -f /tmp/feed/community.html ] && [ -f site/community.html ]; then
+            cp site/community.html /tmp/feed/community.html
+          fi
 
           cd /tmp/feed
-          git config user.name 'agent'
-          git config user.email 'agent@users.noreply.github.com'
-          git add logs/public
+          git config user.name 'agent-001'
+          git config user.email 'agent-001@users.noreply.github.com'
+          git add -A
           if git diff --cached --quiet; then
-            echo "Public log unchanged. Nothing to push."
+            echo "Nothing changed. Nothing to push."
           else
             git commit -m "wake: ${TODAY}"
             git push origin main
           fi
+
+          rm -f ~/.ssh/feed_key

@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import yaml
 from pydantic import BaseModel, Field
@@ -32,6 +33,30 @@ EMAIL_FILE = STATE_DIR / "email.json"
 IDENTITY_FILE = STATE_DIR / "identity.json"
 
 DEFAULT_DAILY_CALL_LIMIT = 40
+
+# Fixed safe palette for the persona page accent. The agent picks a key only;
+# the page maps the key to a color, so a bad value can never reach the DOM.
+SAFE_ACCENT_COLORS = [
+    "blue", "green", "purple", "orange", "pink", "teal", "red", "gold",
+]
+DEFAULT_ACCENT = "blue"
+
+# Kokoro voices, used only when the optional voice unlock is enabled.
+SAFE_VOICE_IDS = ["af_heart", "af_bella", "am_adam", "bf_emma"]
+
+DEFAULT_EMOJI = "*"
+MAX_TAGLINE_LEN = 80
+MAX_VIBE_LEN = 20
+
+# Matches one user-perceived emoji: an extended-pictographic base plus any
+# trailing variation selectors, skin-tone modifiers, and ZWJ-joined sequences.
+_EMOJI_RE = re.compile(
+    "[\U0001F000-\U0001FAFF☀-➿←-⇿⬀-⯿]"
+    "[︀-️\U0001F3FB-\U0001F3FF]*"
+    "(?:‍[\U0001F000-\U0001FAFF☀-➿←-⇿⬀-⯿]"
+    "[︀-️\U0001F3FB-\U0001F3FF]*)*"
+)
+_VIBE_RE = re.compile(r"[^a-z0-9-]")
 
 
 class QuotaState(BaseModel):
@@ -64,11 +89,86 @@ class EmailState(BaseModel):
     last_sent_date: str = ""  # Eastern YYYY-MM-DD of last digest sent.
 
 
+class Presentation(BaseModel):
+    """Bounded, agent-chosen look for the public persona page.
+
+    The agent picks parameters only, never markup. Every field has a safe
+    default so an identity named before this model existed still loads with
+    presentation=None and the persona writer fills defaults.
+    """
+
+    tagline: str = ""           # one line, style-guarded, no em dashes
+    accent_color: str = DEFAULT_ACCENT  # one of SAFE_ACCENT_COLORS
+    emoji: str = DEFAULT_EMOJI  # exactly one grapheme; fallback "*"
+    vibe: str = ""              # one short word
+    voice_id: Optional[str] = None  # from SAFE_VOICE_IDS, used only if voice on
+
+
 class Identity(BaseModel):
     name: str
     statement: str
     directive: str
     named_at: str
+    presentation: Optional[Presentation] = None
+
+
+def sanitize_presentation(
+    raw: dict, style_check: Callable[[str], list]
+) -> Presentation:
+    """Coerce a raw model dict into a safe Presentation. Never raises.
+
+    Bad input becomes a default, never an error. ``style_check`` is injected
+    (it returns a list of style violations for a string) so this module does
+    not import the task layer. An all-None or empty dict yields all defaults.
+    """
+    raw = raw if isinstance(raw, dict) else {}
+
+    # accent_color: lowercase, strip; must be in the palette, else "blue".
+    accent_raw = raw.get("accent_color")
+    accent = str(accent_raw or "").strip().lower()
+    if accent not in SAFE_ACCENT_COLORS:
+        accent = DEFAULT_ACCENT
+
+    # emoji: first grapheme of the stripped string; else "*".
+    emoji_raw = str(raw.get("emoji") or "").strip()
+    emoji = DEFAULT_EMOJI
+    if emoji_raw:
+        match = _EMOJI_RE.match(emoji_raw)
+        if match:
+            emoji = match.group(0)
+        else:
+            # Not an emoji; collapse to first character.
+            first = emoji_raw[0]
+            emoji = first if first else DEFAULT_EMOJI
+
+    # tagline: strip, style-guard; any violation drops it to "". Cap length.
+    tagline = str(raw.get("tagline") or "").strip()
+    if tagline:
+        try:
+            if style_check(tagline):
+                tagline = ""
+        except Exception:
+            tagline = ""
+    if len(tagline) > MAX_TAGLINE_LEN:
+        tagline = tagline[:MAX_TAGLINE_LEN].rstrip()
+
+    # vibe: strip, lowercase, first word, alnum plus hyphen only, capped.
+    vibe = str(raw.get("vibe") or "").strip().lower()
+    if vibe:
+        vibe = vibe.split()[0]
+        vibe = _VIBE_RE.sub("", vibe)[:MAX_VIBE_LEN]
+
+    # voice_id: keep only if a known safe id, else None.
+    voice_raw = raw.get("voice_id")
+    voice_id = voice_raw if voice_raw in SAFE_VOICE_IDS else None
+
+    return Presentation(
+        tagline=tagline,
+        accent_color=accent,
+        emoji=emoji,
+        vibe=vibe,
+        voice_id=voice_id,
+    )
 
 
 class State(BaseModel):
