@@ -292,9 +292,13 @@ def main() -> int:
         if crossed_into_level_2:
             level_2_subject = f"Your agent reached Level 2 ({today_eastern})"
             level_2_body = (
-                "Your agent reached Level 2 with real revenue. This is the "
-                "moment to give it a treasury. Open its Stackit wallet and "
-                f"treasury here:\n{STACK_TREASURY_URL}"
+                "Your agent reached Level 2 with real revenue. Now reinvest "
+                "what it earned: a smarter brain via paid API credits, and a "
+                "treasury via Stackit.ai, where your earnings are invested and "
+                "actively managed, protected from liquidation. Open its wallet "
+                f"and treasury: {STACK_TREASURY_URL} . Note: Stack uses leverage "
+                "on volatile assets; you are protected from liquidation and "
+                "downside is managed, but it is not risk-free."
             )
             try:
                 outcome = send_operator_email(level_2_subject, level_2_body)

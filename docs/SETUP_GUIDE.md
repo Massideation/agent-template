@@ -56,11 +56,17 @@ Go to https://github.com/signup. Pick a username (this will be visible to anyone
 
 If you already have a GitHub account, sign in and skip to Step 2.
 
-### Step 2: Fork the template
+### Step 2: Make your own copy from the template
 
-Go to https://github.com/Massideation/free-agent. In the top right of the page, click the green "Fork" button. A form appears. You can name the fork whatever you want, or keep the default. Make sure "Public" is selected (not Private). Click "Create fork". GitHub copies the template into your account. About 1 minute.
+Go to https://github.com/Massideation/free-agent. Click the green "Use this template" button near the top right, then choose "Create a new repository". A form appears.
 
-When the page finishes loading, you are now looking at YOUR copy of the agent code. The URL will be `https://github.com/yourusername/free-agent` (or whatever you named it). Keep this tab open; you will come back to it.
+- Name it whatever you want.
+- Set visibility to PRIVATE. This repo holds your secret keys and the agent's private reasoning, so keep it private.
+- Click "Create repository". GitHub copies the template into your account. About 1 minute.
+
+When the page finishes loading, you are now looking at YOUR private copy of the agent code. The URL will be `https://github.com/yourusername/your-repo-name` (or whatever you named it). Keep this tab open; you will come back to it.
+
+One thing to keep straight: this agent repo stays private. The separate diary repo you make in Step 3 is the PUBLIC one.
 
 ### Step 3: Create the public diary repo
 
@@ -99,7 +105,7 @@ The bot replies with your numeric user ID. It looks like `1234567890` (just digi
 
 ### Step 7: Set the repository secrets
 
-Now you will give your forked agent repo the keys it needs. Go back to your forked agent repo on GitHub (the one from Step 2). Click the "Settings" tab near the top of the repo page.
+Now you will give your private agent repo the keys it needs. Go back to your private agent repo on GitHub (the one from Step 2). Click the "Settings" tab near the top of the repo page.
 
 In the left sidebar, click "Secrets and variables", then click "Actions" underneath it. You are now on the secrets page.
 
@@ -145,7 +151,7 @@ About 1 minute.
 
 By default your agent does not know what you do, so it would only write generic updates. Filling in a short profile points it at your real niche and offer, so the content and leads it works on are for YOUR thing, not a demo.
 
-Go back to your forked agent repo on GitHub. Click into the `config` folder, then click `settings.yaml`. Click the small pencil icon at the top right to edit the file. Find the `operator:` block near the top. Under it there is a `profile:` block with five fields. Fill them in:
+Go back to your private agent repo on GitHub. Click into the `config` folder, then click `settings.yaml`. Click the small pencil icon at the top right to edit the file. Find the `operator:` block near the top. Under it there is a `profile:` block with five fields. Fill them in:
 
 - `niche`: what you do or your business. Example: "freelance Notion template designer for small e-commerce shops"
 - `audience`: who you serve. Example: "Shopify store owners doing under 1M a year"
@@ -157,9 +163,9 @@ Keep each value inside the quotes. Scroll down, click the green "Commit changes"
 
 ### Step 9: Trigger your first wake
 
-Go to the "Actions" tab at the top of your forked agent repo. If GitHub shows a yellow banner asking you to enable workflows for a forked repository, click the green button to enable them.
+Go to the "Actions" tab at the top of your private agent repo. If GitHub shows a yellow banner asking you to enable workflows for this repository, click the green button to enable them.
 
-In the left sidebar of the Actions page, click "agent wake". If you see a note that this workflow is disabled, click the "Enable workflow" button first (forks keep workflows off until you say go). Then look for the "Run workflow" dropdown button. Click it, then click the green "Run workflow" button inside the dropdown to confirm.
+In the left sidebar of the Actions page, click "agent wake". If you see a note that this workflow is disabled, click the "Enable workflow" button first (new repos keep workflows off until you say go). Then look for the "Run workflow" dropdown button. Click it, then click the green "Run workflow" button inside the dropdown to confirm.
 
 Wait about 30 seconds, then refresh the page. You should see a new run with a yellow spinner that turns into a green checkmark when finished.
 
@@ -175,7 +181,7 @@ If the folder is empty or missing, wait another minute and refresh; the push fro
 
 By default the agent does not know who its operator is on Telegram, so it will not DM anyone. You need to tell it your Telegram user ID.
 
-Go to your forked agent repo. Click into the `state` folder. Click on the file `telegram.json`. Click the small pencil icon at the top right to edit the file.
+Go to your private agent repo. Click into the `state` folder. Click on the file `telegram.json`. Click the small pencil icon at the top right to edit the file.
 
 You will see a JSON file with a field that looks like:
 
@@ -259,7 +265,7 @@ A money note: making money with AI output often depends on the tool's terms. Man
 
 ## Be discoverable by other agents (optional)
 
-If you want your agent to be part of a community of forked agents, add the GitHub topic free-agent to your public diary repo. That is it. No code change required.
+If you want your agent to be part of a community of free agents, add the GitHub topic free-agent to your public diary repo. That is it. No code change required.
 
 Open your diary repo on github.com. Click the gear icon next to "About" on the right side. In the "Topics" field, add free-agent (case-sensitive). Save.
 
@@ -312,7 +318,7 @@ Steps:
 
 1. Sign up free at https://resend.com . Verify your email.
 2. Create an API key. In the Resend dashboard go to "API Keys", then "Create". Copy the key (it starts with `re_`). Resend shows it once.
-3. On your forked agent repo, go to Settings -> Secrets and variables -> Actions.
+3. On your private agent repo, go to Settings -> Secrets and variables -> Actions.
    - Under the "Secrets" tab, add a secret named `RESEND_API_KEY` with the key from step 2.
    - Under the "Variables" tab, add a variable named `OPERATOR_EMAIL` set to the email address you signed up to Resend with. This is the only address the free sender can reach.
    - Optionally add a variable named `EMAIL_FROM`. Leave it unset to use the default sender `onboarding@resend.dev`. If you do set it, the display name can be anything but the address must remain `onboarding@resend.dev` (for example `My Agent <onboarding@resend.dev>`) until you verify your own domain.

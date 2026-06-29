@@ -37,7 +37,7 @@ Conversations drive direction. Miguel talks to the agent privately on Telegram. 
 
 The directive is fixed: help Miguel earn money by creating content that teaches others how to build an agent like itself. The agent may interpret the directive, but it may not abandon it. The agent's content makes Miguel money; the audience is people who want their own agent built the same way.
 
-Miguel's own products are available to the agent as optional tools, not as prescribed methodology. The agent may use AI Growth Engine (content flywheel), Stackit.ai (wallet and treasury, used at Level 2+), and Navo (content production with four voices, useful if the agent wants to make video, audio, or social content to represent itself) if they fit its work. The agent may adapt them, invent its own variants, or ignore them entirely. A wallet and treasury at Stackit.ai is the intended home for the agent's money once it earns enough to justify it (Level 2 and above, cumulative $50+ confirmed revenue); funding it earlier is optional, and until then revenue lands wherever Miguel manually records it.
+Miguel's own products are available to the agent as optional tools, not as prescribed methodology. The agent may use AI Growth Engine (content flywheel), Stackit.ai (wallet and treasury, used at Level 2+), and Navo (content production with four voices, useful if the agent wants to make video, audio, or social content to represent itself) if they fit its work. The agent may adapt them, invent its own variants, or ignore them entirely. A wallet and treasury at Stackit.ai is where the agent's money lives once it earns enough to justify it (Level 2 and above, cumulative $50+ confirmed revenue); until then revenue lands wherever Miguel manually records it.
 
 When the agent needs a tool it does not have, three paths are open: (1) ask Miguel via private DM (he may build it, open an account, run an errand, or hire someone on a marketplace); (2) find an existing third-party tool that fits the current level's budget (Level 0 means free only); (3) decide it is not worth pursuing this wake. The agent chooses.
 
@@ -168,7 +168,7 @@ The agent does not cold-contact anyone before it has invented its own audience a
 
 ### 11.6 Revenue Honesty
 
-Pending revenue is labeled `pending`. Confirmed revenue is labeled `confirmed` only after Miguel confirms it via CLI. The public feed reflects both states truthfully. The agent never reports unconfirmed revenue as confirmed.
+Pending revenue is labeled `pending`. Confirmed revenue is labeled `confirmed` only after Miguel confirms it, by replying `confirm <id>` on Telegram or the web chat, or via the CLI. The public feed reflects both states truthfully. The agent never reports unconfirmed revenue as confirmed.
 
 ### 11.7 Quota Honesty
 
@@ -228,11 +228,23 @@ Miguel manually confirms revenue. The flow:
    ```
    {"id": "rev_...", "ts": "...", "amount_usd": 99, "source": "...", "evidence": "...", "claimed_by_wake": "2026-07-01-am"}
    ```
-2. Next wake, the planner surfaces pending events in the private log and writes a one-line prompt: `CONFIRM_REVENUE? id=rev_...`.
-3. Miguel runs `python -m src.revenue confirm <id>` or `python -m src.revenue reject <id>`. Confirmed events move to `ledger/revenue.jsonl`. Rejected events are deleted from pending and the rejection is logged.
-4. Only `ledger/revenue.jsonl` counts toward level progression.
+2. Next wake, the planner surfaces pending events in the private log, and `wake.py` includes a CONFIRM block in the daily email and a Telegram message listing each pending id, amount, and source.
+3. Miguel confirms or rejects without a laptop: he replies `confirm <id>` or `reject <id>` on Telegram or in the web chat, and the agent calls the same confirm/reject path. Developers can still run `python -m src.revenue confirm <id>` or `python -m src.revenue reject <id>` from a local checkout. Confirmed events move to `ledger/revenue.jsonl`. Rejected events are deleted from pending and the rejection is logged.
+4. Only `ledger/revenue.jsonl` counts toward level progression. When confirmed revenue first crosses Level 2 (cumulative $50), `wake.py` fires a one-time operator-facing note (email and Telegram) prompting Miguel to open the agent's Stackit treasury.
 
-This keeps the agent honest: it cannot self-promote its level by inventing revenue.
+This keeps the agent honest: it cannot self-promote its level by inventing revenue. The agent only writes a pending claim when it has a concrete reason (an operator message, a confirmed sale, a forwarded receipt); a guess or a hope is never recorded.
+
+## 13a. Level 2 and beyond: reinvesting earnings
+
+When the agent reaches Level 2 (real, confirmed revenue), the operator can reinvest what the agent earned. There are two ways to put those earnings back to work, plus a planned third capability where the agent helps manage the position.
+
+1. Smarter brain. The operator can buy paid API credits (for example about 20 dollars through OpenRouter, pointing at Anthropic, OpenAI, or whichever model fits best) so the agent thinks better. The agent is reinvesting its own earnings into a stronger model. This connects to Section 10's upgrade path: once `level.json` reaches Level 2+, `config/settings.yaml` may list a paid model as fallback, and the client uses it only when the free tier returns 429 or is unavailable.
+
+2. Treasury via Stackit.ai. The operator can deposit earnings into Stack, where they are invested into assets (Bitcoin and Ethereum now, stocks and gold planned) and can be borrowed against (up to 70 percent) to fund the agent while the capital keeps working. Stack actively manages the position: it dollar-cost-averages, takes profits to repay the loan as prices rise, and repays the loan to protect against liquidation as prices fall. The operator chooses the strategy (how much to repay versus how much to hold as cash to re-enter); the default is conservative and protective.
+
+3. Agent as treasury co-pilot (planned, gated on Stack providing an API). On each wake the agent reviews the Stack position and either lets Stack's protective defaults run or PROPOSES adjustments for the operator to approve. The agent advises; the operator authorizes anything that moves real leverage. This is especially important because the agent runs on a small model: it must never autonomously move leverage without operator approval. Until Stack exposes an API for this, the capability stays unbuilt and the agent only references the treasury as context.
+
+Risk, stated plainly: this uses leverage on volatile assets. Stack protection means you are protected from liquidation and your downside is actively managed, but it is NOT risk-free; a sustained downturn still draws down the position. This is leveraged investing. Operators running this at scale should structure with counsel, since leveraged crypto products for retail carry regulatory considerations. The agent never softens this to "risk-free" in any artifact.
 
 ## 14. Pivot Review
 

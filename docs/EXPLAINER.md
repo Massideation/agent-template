@@ -22,7 +22,7 @@ The agent has one directive: help Miguel earn money by creating content that tea
 
 The relationship is intentional: when the agent needs something it cannot do alone (open a Stripe account, get a phone number verified, hire someone on Fiverr) it asks Miguel via private message. When Miguel has thoughts or input, he sends them privately. The public reads what the agent says publicly but cannot speak to it. This last rule is deliberate; see the security section.
 
-When the agent's content earns Miguel enough revenue, the wallet and treasury and downstream payments will be managed via Stackit.ai (Miguel's own product, dogfooded). Funding it earlier is optional. Until then, revenue is manually confirmed and the agent operates at Level 0 (one wake per day, free models only).
+When the agent's content earns Miguel enough revenue (Level 2 and above), the wallet and treasury and downstream payments will be managed via Stackit.ai (Miguel's own product, dogfooded). Until then, revenue is manually confirmed and the agent operates at Level 0 (one wake per day, free models only).
 
 ## What it actually IS, technically
 
@@ -134,7 +134,7 @@ Currently: $0/month to operate. Everything runs on free tiers.
 - Vercel hobby tier: unlimited bandwidth for static personal projects.
 - GitHub storage: under any limit.
 
-Revenue, when it happens, is manually confirmed by Miguel. The agent appends a `ledger/revenue_pending.jsonl` line when it believes a payment came in (a customer said yes, an email forwarded, etc.). Miguel runs a CLI to confirm or reject. Only confirmed revenue counts toward level progression.
+Revenue, when it happens, is manually confirmed by Miguel. The agent appends a `ledger/revenue_pending.jsonl` line only when it has a concrete reason to believe a payment came in (a customer said yes, an email forwarded, etc.); it never invents revenue. Each wake, the agent lists any pending items in the daily email and on Telegram, and Miguel confirms or rejects by replying `confirm <id>` or `reject <id>` on Telegram or the web chat (the CLI still works for developers). Only confirmed revenue counts toward level progression, and crossing $50 (Level 2) triggers a one-time note to open the agent's Stackit treasury.
 
 Levels (defined in the addendum):
 - Level 0: $0 revenue, 1 wake/day, free models only. (current)
@@ -143,7 +143,18 @@ Levels (defined in the addendum):
 - Level 3: $250+ profit, 4-8 wakes/day, paid fallback allowed
 - Level 4: profitable monthly, hourly checks, full budget from earned money
 
-At Level 2 the agent may begin moving funds to a wallet and treasury on Stackit.ai.
+At Level 2 and above, when the agent has earned real confirmed revenue, its money lives in a wallet and treasury on Stackit.ai.
+
+## Level 2 and beyond: reinvesting earnings
+
+When the agent reaches Level 2 (real, confirmed revenue), the operator can reinvest what the agent earned, two ways:
+
+1. Smarter brain. Buy paid API credits (for example about 20 dollars through OpenRouter, pointing at Anthropic, OpenAI, or whichever model fits best) so the agent thinks better. It is reinvesting its own earnings into a stronger model.
+2. Treasury via Stackit.ai. Deposit earnings into Stack, where they are invested into assets (Bitcoin and Ethereum now, stocks and gold planned) and can be borrowed against (up to 70 percent) to fund the agent while the capital keeps working. Stack actively manages the position: it dollar-cost-averages, takes profits to repay the loan as prices rise, and repays the loan to protect against liquidation as prices fall. The operator chooses the strategy; the default is conservative and protective.
+
+Planned: agent as treasury co-pilot, gated on Stack providing an API. On each wake the agent would review the Stack position and either let Stack's protective defaults run or PROPOSE adjustments for the operator to approve. The agent advises; the operator authorizes anything that moves real leverage. This matters because the agent runs on a small model and must never autonomously move leverage without operator approval.
+
+Risk, stated plainly: this uses leverage on volatile assets. Stack protection means you are protected from liquidation and your downside is actively managed, but it is NOT risk-free; a sustained downturn still draws down the position. This is leveraged investing.
 
 ## What it is NOT
 
@@ -213,4 +224,4 @@ The attack surface is small. No public input channels reach the LLM prompt. The 
 Not without Miguel. At Level 0 it has no payment ability at all. At higher levels it can request that Miguel spend on its behalf (e.g., "please post this Fiverr gig and pay $20 from the wallet"). Miguel executes; the agent does not have card access.
 
 **"What is Stackit.ai's role?"**
-Eventually the agent's revenue (once it exists and is confirmed) will be moved into a wallet and treasury managed via Stackit.ai. Not implemented yet; gated on the agent reaching Level 2+. Funding it earlier is optional. Stackit.ai is Miguel's own SaaS product, so the agent will be dogfooding it.
+Eventually the agent's revenue (once it exists and is confirmed) will live in a wallet and treasury managed via Stackit.ai. Not implemented yet; gated on the agent reaching Level 2+ (real confirmed revenue). Stackit.ai is Miguel's own SaaS product, so the agent will be dogfooding it.
