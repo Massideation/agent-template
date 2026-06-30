@@ -137,13 +137,13 @@ def _build_prompt() -> str:
         'steady",\n'
         '  "voice_id": "optional, one of: af_heart, af_bella, am_adam, '
         'bf_emma, or null",\n'
-        f'  "telegram_to_miguel": "2 to 4 sentence opening message to {name}",\n'
+        f'  "telegram_to_operator": "2 to 4 sentence opening message to {name}",\n'
         '  "reasoning": "private only, never published, or null"\n'
         "}\n"
         "\n"
         "The five look fields (tagline, accent_color, emoji, vibe, voice_id) "
         "are optional. Pick them if you can. The required fields are name, "
-        "statement, directive, public_intro, and telegram_to_miguel.\n"
+        "statement, directive, public_intro, and telegram_to_operator.\n"
     )
 
 
@@ -217,7 +217,7 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
         "statement",
         "directive",
         "public_intro",
-        "telegram_to_miguel",
+        "telegram_to_operator",
     )
     missing = [k for k in required_keys if k not in parsed]
     if missing:
@@ -257,7 +257,7 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
     statement_clean = parsed["statement"].strip()
     directive_clean = parsed["directive"].strip()
     public_intro_clean = parsed["public_intro"].strip()
-    telegram_to_miguel_clean = parsed["telegram_to_miguel"].strip()
+    telegram_to_operator_clean = parsed["telegram_to_operator"].strip()
 
     if not name_raw:
         return TaskResult(
@@ -287,7 +287,7 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
         "name": name_clean,
         "statement": statement_clean,
         "public_intro": public_intro_clean,
-        "telegram_to_miguel": telegram_to_miguel_clean,
+        "telegram_to_operator": telegram_to_operator_clean,
     }
     violations: list[str] = []
     for field, value in fields_to_check.items():
@@ -304,7 +304,7 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
                 + f"\nname={name_clean!r}\nstatement={statement_clean!r}\n"
                 f"directive={directive_clean!r}\n"
                 f"public_intro={public_intro_clean!r}\n"
-                f"telegram_to_miguel={telegram_to_miguel_clean!r}"
+                f"telegram_to_operator={telegram_to_operator_clean!r}"
             ),
             public_summary=(
                 "The agent drafted its first introduction today, but its "
@@ -373,7 +373,7 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
         telegram_status = "skipped: TELEGRAM_BOT_TOKEN not set"
     elif chat_id is not None:
         try:
-            full = f"{telegram_to_miguel_clean}\n\n{DISCLOSURE_FOOTER}"
+            full = f"{telegram_to_operator_clean}\n\n{DISCLOSURE_FOOTER}"
             _send_message(token, chat_id, full)
             telegram_status = f"sent to chat_id={chat_id}"
         except httpx.HTTPError as exc:
@@ -390,7 +390,7 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
         f"statement={statement_clean!r}",
         f"directive={directive_clean!r}",
         f"public_intro={public_intro_clean!r}",
-        f"telegram_to_miguel={telegram_to_miguel_clean!r}",
+        f"telegram_to_operator={telegram_to_operator_clean!r}",
         f"telegram_status={telegram_status}",
         f"reasoning_status={reasoning_status}",
         presentation_note,

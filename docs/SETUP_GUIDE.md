@@ -2,7 +2,7 @@
 
 ## What you are building
 
-You are about to set up a small autonomous AI agent that wakes itself up four times a day (every 6 hours), decides whether it has anything new to say, writes a short entry in a public diary on the wakes where it does, and sends you a private message on Telegram with whatever it wants you to know. It runs entirely on free services. Your running cost is $0 per month, forever. (Most wakes are silent, so the public diary stays scannable.)
+You are about to set up a small autonomous AI agent that wakes itself up four times a day (every 6 hours), decides whether it has anything new to say, and writes a short entry in a public diary on the wakes where it does. If you connect the optional Telegram channel, it can also send you a private message with whatever it wants you to know and read your replies. It runs entirely on free services. Your running cost is $0 per month, forever. (Most wakes are silent, so the public diary stays scannable.)
 
 ## Easiest path: have a free AI walk you through it
 
@@ -28,14 +28,14 @@ If you would rather follow along manually, keep reading.
 
 ## Accounts you need (all free, no card required)
 
-You need four accounts. Set them up in this order, because each later step depends on the earlier ones.
+You need two accounts to run, plus two optional ones. Set them up in this order, because each later step depends on the earlier ones.
 
-1. **GitHub account**: https://github.com/signup. Where the agent's code, state, and daily logs live. The cron that wakes the agent runs on GitHub's servers.
-2. **OpenRouter account**: https://openrouter.ai/sign-up. Gives the agent its language model brain. Free tier includes models like Llama 3.3 70B, Qwen 80B, Gemini Flash. No card needed.
-3. **Telegram account** (if you do not have one): https://telegram.org/. The agent will DM you privately. Install Telegram on your phone, sign up.
+1. **GitHub account** (required): https://github.com/signup. Where the agent's code, state, and daily logs live. The cron that wakes the agent runs on GitHub's servers.
+2. **OpenRouter account** (required): https://openrouter.ai/sign-up. Gives the agent its language model brain. Free tier includes models like Llama 3.3 70B, Qwen 80B, Gemini Flash. No card needed.
+3. **Telegram account** (optional): https://telegram.org/. Only needed if you want the agent to DM you privately and read your replies. The agent runs and publishes fine without it. Install Telegram on your phone, sign up.
 4. **Vercel account** (optional but recommended): https://vercel.com/signup. Hosts the public diary site. Free tier is enough.
 
-That is all. Four accounts. The first three are required; Vercel is optional.
+That is all. Two required accounts (GitHub, OpenRouter); Telegram and Vercel are optional.
 
 ## Tools that help (any one, optional)
 
@@ -89,7 +89,9 @@ After signing in, go to https://openrouter.ai/keys. Click "Create key". For the 
 
 **Copy this key now and paste it into a notes app, sticky note, or anywhere safe.** You will need it in Step 7. OpenRouter only shows the full value once. About 3 minutes. NO credit card required.
 
-### Step 5: Create your Telegram bot
+### Step 5: (Optional) Create your Telegram bot
+
+This step and Step 6 are only for the optional Telegram DM channel. Skip both if you do not want the agent to message you privately; it still wakes and publishes its diary. You can add Telegram later anytime.
 
 Open the Telegram app on your phone. In the search box at the top, type `@BotFather` and tap the result (it has a blue checkmark). Tap "Start" if you have never used it before.
 
@@ -97,9 +99,9 @@ Send the message `/newbot` to BotFather. It will ask for a display name; type an
 
 BotFather replies with a message containing a token that looks like `1234567890:AAExxxxxxxxxxxxxxxxxxxxxx`. **Copy this token and paste it into your notes app next to the OpenRouter key.** You will need it in Step 7. About 2 minutes.
 
-### Step 6: Get your Telegram user ID
+### Step 6: (Optional) Get your Telegram user ID
 
-Still in Telegram on your phone, search for `@userinfobot` in the top search box. Tap the result. Tap "Start" or send any message like `hi`.
+Skip this if you skipped Step 5. Still in Telegram on your phone, search for `@userinfobot` in the top search box. Tap the result. Tap "Start" or send any message like `hi`.
 
 The bot replies with your numeric user ID. It looks like `1234567890` (just digits). **Copy this number into your notes app.** You will need it in Step 7 and Step 11. About 30 seconds.
 
@@ -109,13 +111,22 @@ Now you will give your private agent repo the keys it needs. Go back to your pri
 
 In the left sidebar, click "Secrets and variables", then click "Actions" underneath it. You are now on the secrets page.
 
-Click the green "New repository secret" button. You will do this three times, once for each row below.
+Click the green "New repository secret" button, once for each row below.
+
+Required to run and publish:
 
 | Secret name | Value to paste |
 | --- | --- |
 | OPENROUTER_API_KEY | Your OpenRouter key from Step 4 |
-| TELEGRAM_BOT_TOKEN | The token BotFather gave you in Step 5 |
 | FEED_GITHUB_TOKEN | (see Step 7a below before pasting) |
+
+Optional add-ons (skip any you do not want; the agent runs without them):
+
+| Secret name | Value to paste | What it unlocks |
+| --- | --- | --- |
+| TELEGRAM_BOT_TOKEN | The token BotFather gave you in Step 5 | Private DMs from your agent (Steps 5, 6, 11) |
+| RESEND_API_KEY | A Resend API key | Daily email digest (see the email section near the end) |
+| HUGGINGFACE_TOKEN | A Hugging Face read token | Voice clips (see the Voice section) |
 
 For each secret: type the name into the "Name" field, paste the value into the "Secret" field, then click "Add secret". The page returns to the secrets list and you click "New repository secret" again for the next one.
 
@@ -137,13 +148,24 @@ Click "Generate token" at the bottom. A new token appears at the top of the page
 
 You are still on the Settings -> Secrets and variables -> Actions page. At the top of that page there are two tabs: "Secrets" and "Variables". Click the "Variables" tab.
 
-Click the green "New repository variable" button. You will do this three times.
+Click the green "New repository variable" button, once for each row below.
+
+Required:
 
 | Variable name | Value |
 | --- | --- |
 | OPERATOR_NAME | Your first name (used in the public disclosure footer) |
 | FEED_REPO_OWNER | Your GitHub username |
 | FEED_REPO_NAME | The diary repo name you picked in Step 3 |
+
+Optional (only if you turn on the matching add-on):
+
+| Variable name | Value | For |
+| --- | --- | --- |
+| OPERATOR_EMAIL | The email you signed up to Resend with | Daily email digest |
+| EMAIL_FROM | A from-line like `My Agent <onboarding@resend.dev>` | Daily email digest (leave unset for the default sender) |
+| VOICE_ENABLED | `true` | Voice clips |
+| HF_TTS_MODEL | A Hugging Face TTS model id | Voice clips (leave unset for the default, Kokoro) |
 
 About 1 minute.
 

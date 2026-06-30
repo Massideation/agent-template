@@ -1,6 +1,6 @@
 # Free Agent
 
-Free Agent is a template for a free autonomous AI agent. Fork it, follow the setup guide, and you have your own. The community of builders is at https://github.com/Massideation/free-agent/discussions .
+Free Agent is a template for a free autonomous AI agent. Fork it, follow the setup guide, and you have your own. The builder community is on Skool at https://www.skool.com/stack-assets-4596/about?ref=5231a67832da4ef5b9f20dc8c3fba35e . For code questions and bug reports, use GitHub issues on this repo.
 
 ## What this is
 
@@ -25,7 +25,7 @@ The agent itself never calls any of those. After setup, it runs on OpenRouter fr
 
 ## How it works
 
-A scheduled GitHub Actions workflow fires on a cron schedule. Default cadence: 4 wakes/day (every 6 hours). Change the cron in .github/workflows/wake.yml if you want hourly or a different cadence. The runner checks out your forked repo, loads the agent's memory and state, calls either `reflect_and_name` (first wake) or `decide_next` (every subsequent wake), takes one action (post to the diary when it has something to say, DM the operator, or rest quietly), and commits the updated state back to the repo. The public diary lives in a SECOND repo you create, mirrored over SSH using a deploy key.
+A scheduled GitHub Actions workflow fires on a cron schedule. Default cadence: 4 wakes/day (every 6 hours). Change the cron in .github/workflows/wake.yml if you want hourly or a different cadence. The runner checks out your forked repo, loads the agent's memory and state, calls either `reflect_and_name` (first wake) or `decide_next` (every subsequent wake), takes one action (post to the diary when it has something to say, DM the operator, or rest quietly), and commits the updated state back to the repo. The public diary lives in a SECOND repo you create, mirrored over HTTPS using a fine-grained personal access token (`FEED_GITHUB_TOKEN`).
 
 ## Prerequisites
 
@@ -39,22 +39,16 @@ A scheduled GitHub Actions workflow fires on a cron schedule. Default cadence: 4
 
 2. Sign up for OpenRouter (free tier is fine) and create an API key. Save it somewhere safe for step 5.
 
-3. Generate an SSH deploy key so your agent repo can write to your diary repo:
+3. Create a fine-grained personal access token so your agent repo can write to your diary repo. Go to https://github.com/settings/personal-access-tokens/new . Set Resource owner to yourself, Repository access to "Only select repositories" and pick the PUBLIC diary repo from step 1, and under Repository permissions set Contents to "Read and write". Generate it and copy the token (it starts with `github_pat_`). GitHub shows it once. Save it for step 5. This works from a phone; no SSH key needed.
 
-   ```
-   ssh-keygen -t ed25519 -f /tmp/feed_key -N "" -C "agent-feed"
-   ```
+4. (Optional) Create a Telegram bot via @BotFather on Telegram. Send `/newbot`, pick a name and username, and save the bot token it gives you. The agent runs fine without this; it just will not DM you until you add it.
 
-   Open `/tmp/feed_key.pub` and add it as a deploy key with WRITE access on your public diary repo (Settings, Deploy keys, Add deploy key, check "Allow write access"). Open `/tmp/feed_key` (the private half) and save the contents for step 5.
-
-4. Create a Telegram bot via @BotFather on Telegram. Send `/newbot`, pick a name and username, and save the bot token it gives you.
-
-5. On your forked agent repo, go to Settings, Secrets and variables, Actions, and add these three repository SECRETS:
+5. On your forked agent repo, go to Settings, Secrets and variables, Actions, and add these repository SECRETS:
    - `OPENROUTER_API_KEY`: your OpenRouter free-tier key from step 2.
-   - `TELEGRAM_BOT_TOKEN`: the bot token from BotFather in step 4.
-   - `FEED_DEPLOY_KEY`: the contents of the private SSH key file from step 3.
+   - `FEED_GITHUB_TOKEN`: the fine-grained token from step 3 (Contents write on the diary repo).
+   - `TELEGRAM_BOT_TOKEN`: (optional) the bot token from BotFather in step 4.
 
-6. On the same settings page, switch to the Variables tab and add these three repository VARIABLES (not secrets):
+6. On the same settings page, switch to the Variables tab and add these repository VARIABLES (not secrets):
    - `OPERATOR_NAME`: your name. Used in the public disclosure footer on every diary post.
    - `FEED_REPO_OWNER`: your GitHub username or org that owns the diary repo from step 1.
    - `FEED_REPO_NAME`: the name of the diary repo, for example `yourname-agent-diary`.
@@ -63,7 +57,7 @@ A scheduled GitHub Actions workflow fires on a cron schedule. Default cadence: 4
 
 8. (Optional, recommended) Connect your diary repo to Vercel. Vercel will render the daily diary as a public website automatically on every push, with no extra config needed for a flat Markdown or HTML feed.
 
-9. Trigger Wake 1 manually from the Actions tab on your forked agent repo (Workflows, Wake, Run workflow). The agent will pick its own name and post its first introduction to the diary.
+9. Trigger Wake 1 manually from the Actions tab on your forked agent repo (in the left sidebar click "agent wake", then "Run workflow"). The agent will pick its own name and post its first introduction to the diary.
 
 ## After Wake 1
 
@@ -96,45 +90,23 @@ Local models (Ollama, LM Studio, etc.) are free but impractical on GitHub Action
 
 ## Setting up entirely on a phone
 
-Most of the setup works from a phone. The one friction point is the SSH deploy key, and you can skip that by using a Personal Access Token instead.
+The whole setup works from a phone. The diary mirror uses a fine-grained personal access token (`FEED_GITHUB_TOKEN`) over HTTPS, so there is no `ssh-keygen` step to get stuck on.
 
 Works on phone (any browser or app):
 - Fork this repo on github.com mobile
 - Sign up for OpenRouter, generate an API key (mobile browser)
+- Create the `FEED_GITHUB_TOKEN` fine-grained token (Contents write on the diary repo) at https://github.com/settings/personal-access-tokens/new
 - Set repo secrets and variables on github.com mobile
-- Create your Telegram bot via @BotFather inside the Telegram app
-- DM @userinfobot to get your numeric Telegram user_id
+- (Optional) Create your Telegram bot via @BotFather inside the Telegram app, and DM @userinfobot to get your numeric Telegram user_id
 - Edit `state/telegram.json` to set `operator_telegram_user_id` (github.com mobile editor)
 - Trigger workflows from the Actions tab (mobile browser)
 - Deploy to Vercel via vercel.com mobile
-
-The friction point: the README's default flow uses an SSH deploy key (`ssh-keygen`) for cross-repo writes. Phones do not have `ssh-keygen` by default.
-
-Two ways around it:
-
-OPTION A: install a terminal app.
-- Android: Termux from F-Droid. Run `ssh-keygen` there.
-- iOS: a-Shell or iSH from the App Store. Same flow.
-
-OPTION B (recommended for phone-only setup): use a GitHub fine-grained Personal Access Token instead of an SSH deploy key.
-
-1. Go to https://github.com/settings/personal-access-tokens/new on your phone browser.
-2. Fine-grained token. Resource owner: yourself. Repository access: select the PUBLIC diary repo only. Permissions: Contents, Read and write.
-3. Generate, copy the token.
-4. Add it as a repo secret called `FEED_GITHUB_TOKEN` on your forked agent repo.
-5. Edit `.github/workflows/wake.yml`: in the "Mirror today's public log" step, replace the SSH clone command with a token-based HTTPS clone. The pattern is:
-
-   ```
-   git clone https://x-access-token:${{ secrets.FEED_GITHUB_TOKEN }}@github.com/${{ vars.FEED_REPO_OWNER }}/${{ vars.FEED_REPO_NAME }}.git /tmp/feed
-   ```
-
-That replaces the entire SSH/deploy-key flow. Everything else stays the same.
 
 So yes, you can build and run this entirely from a phone.
 
 ## Customizing
 
-The agent's directive (its purpose, voice, and constraints) lives in `src/tasks/reflect_and_name.py` as `DEFAULT_DIRECTIVE`. The wake schedule lives in `.github/workflows/wake.yml`. The list of forbidden style words (the style guard) is in `src/style_guard.py`. Add your own tools as the agent grows, and tell it about them in your DMs.
+The agent's directive (its purpose, voice, and constraints) is derived from the operator profile you fill in at `config/settings.yaml` (your niche, audience, offer, and goal) and built at runtime by `_default_directive()` in `src/tasks/reflect_and_name.py`. The wake schedule lives in `.github/workflows/wake.yml`. The list of forbidden style words (the style guard) is in `src/style_guard.py`. Add your own tools as the agent grows, and tell it about them in your DMs.
 
 ## See also
 

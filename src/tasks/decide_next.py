@@ -124,7 +124,7 @@ def _build_recent_telegram_block(notes: list[str]) -> str:
             if not stripped:
                 continue
             lowered = stripped.lower()
-            if "telegram" in lowered or "miguel" in lowered:
+            if "telegram" in lowered or "operator" in lowered:
                 relevant.append(stripped)
         if not relevant:
             continue
@@ -237,7 +237,7 @@ def _build_prompt(
         "{\n"
         '  "public_summary": "your 2 to 4 sentence diary update",\n'
         '  "reasoning": null,\n'
-        '  "telegram_to_miguel": null,\n'
+        '  "telegram_to_operator": null,\n'
         '  "search_queries": [],\n'
         '  "inbox_reply": null,\n'
         '  "revenue_claim": null\n'
@@ -432,7 +432,7 @@ def _build_search_followup_prompt(
         "{\n"
         '  "public_summary": "your final 2 to 4 sentence diary update",\n'
         '  "reasoning": null,\n'
-        '  "telegram_to_miguel": null\n'
+        '  "telegram_to_operator": null\n'
         "}\n"
     )
 
@@ -529,7 +529,7 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
             "Your previous reply was not valid JSON. Reply again with ONLY a "
             "single JSON object and nothing else (no prose, no code fence). "
             "Use exactly these keys: reasoning, public_summary, "
-            "telegram_to_miguel, search_queries, inbox_reply, revenue_claim. "
+            "telegram_to_operator, search_queries, inbox_reply, revenue_claim. "
             "Use null or an empty list where you have nothing. Here was your "
             "previous reply:\n\n"
             + raw_output_1
@@ -568,7 +568,7 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
 
     reasoning_1_raw = parsed.get("reasoning")
     public_summary_1_raw = parsed.get("public_summary")
-    telegram_1_raw = parsed.get("telegram_to_miguel")
+    telegram_1_raw = parsed.get("telegram_to_operator")
     search_queries_raw = parsed.get("search_queries")
 
     violation_log: list[str] = []
@@ -606,14 +606,14 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
             tg_violations = style_check(candidate)
             if tg_violations:
                 violation_log.append(
-                    "call_1 telegram_to_miguel style violations: "
+                    "call_1 telegram_to_operator style violations: "
                     + ", ".join(tg_violations)
                 )
             else:
                 telegram_1_text = candidate
     elif telegram_1_raw is not None:
         violation_log.append(
-            "call_1 telegram_to_miguel had unexpected type: "
+            "call_1 telegram_to_operator had unexpected type: "
             f"{type(telegram_1_raw).__name__}"
         )
 
@@ -698,7 +698,7 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
                 if parsed_2 is not None:
                     reasoning_2_raw = parsed_2.get("reasoning")
                     public_summary_2_raw = parsed_2.get("public_summary")
-                    telegram_2_raw = parsed_2.get("telegram_to_miguel")
+                    telegram_2_raw = parsed_2.get("telegram_to_operator")
 
                     if "reasoning" not in parsed_2:
                         reasoning_2 = ""
@@ -735,7 +735,7 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
                             tg_violations = style_check(candidate)
                             if tg_violations:
                                 violation_log.append(
-                                    "call_2 telegram_to_miguel style "
+                                    "call_2 telegram_to_operator style "
                                     "violations: "
                                     + ", ".join(tg_violations)
                                 )
@@ -743,7 +743,7 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
                                 telegram_2_text = candidate
                     else:
                         violation_log.append(
-                            "call_2 telegram_to_miguel had unexpected "
+                            "call_2 telegram_to_operator had unexpected "
                             f"type: {type(telegram_2_raw).__name__}"
                         )
 
@@ -923,7 +923,7 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
         if public_summary_1_raw is not None
         else "public_summary: (missing)"
     )
-    summary_parts.append(f"telegram_to_miguel: {telegram_1_raw!r}")
+    summary_parts.append(f"telegram_to_operator: {telegram_1_raw!r}")
     summary_parts.append(f"search_queries (after cleaning): {cleaned_queries!r}")
     if notes_call_1:
         summary_parts.append("call_1 notes: " + "; ".join(notes_call_1))
@@ -963,7 +963,7 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
                 f"public_summary: {parsed_2.get('public_summary')!r}"
             )
             summary_parts.append(
-                f"telegram_to_miguel: {parsed_2.get('telegram_to_miguel')!r}"
+                f"telegram_to_operator: {parsed_2.get('telegram_to_operator')!r}"
             )
         else:
             summary_parts.append("(call 2 did not produce parseable JSON)")
