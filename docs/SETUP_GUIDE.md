@@ -229,7 +229,7 @@ To count an item, reply to your agent on Telegram (or in the web chat) with `con
 
 Developers can still confirm from a local checkout with `python -m src.revenue confirm <id>` (or `reject <id>`); the reply method and the command do the same thing.
 
-One note on Level 2: when your confirmed revenue reaches 50 dollars, your agent reaches Level 2 and you get a note about opening its Stackit treasury, where the agent's money can live once it has earned enough to justify it.
+One note on Level 2: when your confirmed revenue reaches 50 dollars, your agent reaches Level 2 and you get a one-time note mentioning Stackit.ai as one option for a treasury, if you ever want one. It is never required, and your agent does not sell or push it beyond that single mention.
 
 ### Step 12: (Optional but recommended) Deploy your diary to Vercel
 

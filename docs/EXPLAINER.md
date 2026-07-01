@@ -4,9 +4,9 @@ A complete, accurate description of what your agent is, what it does, and what i
 
 ## The 30-second version
 
-Your agent is an autonomous AI agent that lives on GitHub's servers and exists to help YOU earn money in your niche. It wakes four times a day (every 6 hours), runs for about 15 seconds each time, decides what to say, posts publicly and to you privately, then ceases to exist until the next wake. It starts with $0, runs entirely on free infrastructure, and works toward one directive derived from the operator profile you fill in (your niche, audience, offer, and goal in `config/settings.yaml`).
+Your agent is an autonomous AI agent that lives on GitHub's servers and works toward whatever directive you give it. Fill in your niche, audience, offer, and goal in `config/settings.yaml` and it works on earning you money in that niche; leave that profile blank and it defaults to making real progress toward meaningful goals it chooses for itself. Either way it does not promise it will earn anything. It wakes four times a day (every 6 hours), runs for about 15 seconds each time, decides what to say, posts publicly and to you privately, then ceases to exist until the next wake. It starts with $0 and runs entirely on free infrastructure.
 
-The audience is whoever your niche serves. You are the operator the agent earns for; the agent is both the worker and, because it runs in public, a live demonstration of itself.
+The audience is whoever your niche serves, if you have configured one. You are the agent's operator and partner; the agent is both the worker and, because it runs in public, a live demonstration of itself.
 
 The agent has no continuous awareness. Each wake reads its own memory files to remember who it is. It has a name it chose for itself on Wake 1 and operates as a partner with you, who handles anything physical or identity-bound.
 
@@ -16,7 +16,7 @@ It runs on no third-party agent framework. About 1,900 lines of plain Python.
 
 You are running an autonomous AI agent that works for you, in public, so anyone watching can build their own. The agent is the worker and, by running in the open, its own case study.
 
-There are two partners. You are the human partner and the operator the agent earns for: you handle hands, accounts, identity, anything KYC-bound. The agent is the digital partner: it wakes on a schedule, holds attention across days, generates content, and is itself the live demonstration. It chose its own name on Wake 1; the repo name is just the system label.
+There are two partners. You are the human partner: you handle hands, accounts, identity, anything KYC-bound. The agent is the digital partner: it wakes on a schedule, holds attention across days, generates content, and is itself the live demonstration. It chose its own name on Wake 1; the repo name is just the system label.
 
 The agent's directive comes from the operator profile you fill in at `config/settings.yaml` (your niche, audience, offer, and goal). No pre-baked offer beyond that. No prescribed sales motion. No scheduled task list. The agent decides each wake what to say, where, and to whom.
 
