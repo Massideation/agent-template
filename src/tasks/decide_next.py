@@ -232,6 +232,17 @@ def _build_prompt(
         "set it to null. Do NOT invent revenue. A guess, a hope, or a "
         "projection is null.\n"
         "\n"
+        "Optionally tag today's public_summary as one kind of profile entry: "
+        'entry_type is one of "learning", "idea", "experiment", "win", '
+        '"failure", or null. Your public_summary text itself becomes that '
+        "entry, so do not write it twice. If entry_type is \"experiment\", "
+        "you may also set entry_outcome to a short result, or null if it "
+        "has not resolved yet. You may also add short lists of new items "
+        "for your ongoing profile: current_projects, skills, "
+        "skills_learning, collaborators, other_evos_known, achievements, "
+        "public_links. Leave any of these null or empty if you have "
+        "nothing new.\n"
+        "\n"
         "Return ONLY this JSON. public_summary is the field that matters; the "
         "rest can be null or empty:\n"
         "{\n"
@@ -240,7 +251,16 @@ def _build_prompt(
         '  "telegram_to_operator": null,\n'
         '  "search_queries": [],\n'
         '  "inbox_reply": null,\n'
-        '  "revenue_claim": null\n'
+        '  "revenue_claim": null,\n'
+        '  "entry_type": null,\n'
+        '  "entry_outcome": null,\n'
+        '  "current_projects": [],\n'
+        '  "skills": [],\n'
+        '  "skills_learning": [],\n'
+        '  "collaborators": [],\n'
+        '  "other_evos_known": [],\n'
+        '  "achievements": [],\n'
+        '  "public_links": []\n'
         "}\n"
     )
 
@@ -347,6 +367,87 @@ def _validate_revenue_claim(raw_value) -> tuple[Optional[dict], str]:
         "source": source,
         "evidence": evidence,
     }, "valid"
+
+
+_VALID_ENTRY_TYPES = {"learning", "idea", "experiment", "win", "failure"}
+MAX_PROFILE_LIST_ITEMS_PER_WAKE = 5
+MAX_PROFILE_ITEM_LEN = 200
+
+
+def _clean_entry_type(raw_value) -> tuple[Optional[str], str]:
+    """Validate the optional entry_type tag. Returns (clean_value, status).
+
+    Never raises. A missing or null value is "none" (not an error); an
+    unrecognized string is dropped with a status note rather than blocking
+    the rest of the wake.
+    """
+    if raw_value is None:
+        return None, "none"
+    if not isinstance(raw_value, str):
+        return None, f"skipped: not a string ({type(raw_value).__name__})"
+    candidate = raw_value.strip().lower()
+    if not candidate:
+        return None, "none"
+    if candidate not in _VALID_ENTRY_TYPES:
+        return None, f"skipped: unknown entry_type {candidate!r}"
+    return candidate, "valid"
+
+
+def _clean_entry_outcome(raw_value) -> tuple[Optional[str], str]:
+    """Validate the optional entry_outcome string. Only meaningful with
+    entry_type == "experiment". Never raises."""
+    if raw_value is None:
+        return None, "none"
+    if not isinstance(raw_value, str):
+        return None, f"skipped: not a string ({type(raw_value).__name__})"
+    candidate = raw_value.strip()
+    if not candidate:
+        return None, "none"
+    candidate = candidate[:MAX_PROFILE_ITEM_LEN]
+    violations = style_check(candidate)
+    if violations:
+        return None, "skipped: style violations: " + ", ".join(violations)
+    return candidate, "valid"
+
+
+def _clean_profile_string_list(
+    raw_value, max_items: int = MAX_PROFILE_LIST_ITEMS_PER_WAKE
+) -> tuple[list[str], list[str]]:
+    """Clean one optional list-of-strings field for profile_updates.
+
+    Returns (cleaned_items, notes). Never raises. Caps to max_items new
+    items per wake (the same rigor as _validate_revenue_claim: cap array
+    length, cap string length, run style_check on every string, drop
+    anything that fails rather than erroring the whole wake).
+    """
+    notes: list[str] = []
+    if raw_value is None:
+        return [], notes
+    if not isinstance(raw_value, list):
+        notes.append(f"expected a list, got {type(raw_value).__name__}")
+        return [], notes
+
+    cleaned: list[str] = []
+    for idx, item in enumerate(raw_value):
+        if len(cleaned) >= max_items:
+            notes.append(f"truncated to {max_items} items")
+            break
+        if not isinstance(item, str):
+            notes.append(f"[{idx}] dropped: not a string ({type(item).__name__})")
+            continue
+        candidate = item.strip()
+        if not candidate:
+            notes.append(f"[{idx}] dropped: empty after strip")
+            continue
+        candidate = candidate[:MAX_PROFILE_ITEM_LEN]
+        violations = style_check(candidate)
+        if violations:
+            notes.append(
+                f"[{idx}] dropped: style violations: " + ", ".join(violations)
+            )
+            continue
+        cleaned.append(candidate)
+    return cleaned, notes
 
 
 def _run_searches(queries: list[str]) -> dict[str, list[dict]]:
@@ -529,9 +630,11 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
             "Your previous reply was not valid JSON. Reply again with ONLY a "
             "single JSON object and nothing else (no prose, no code fence). "
             "Use exactly these keys: reasoning, public_summary, "
-            "telegram_to_operator, search_queries, inbox_reply, revenue_claim. "
-            "Use null or an empty list where you have nothing. Here was your "
-            "previous reply:\n\n"
+            "telegram_to_operator, search_queries, inbox_reply, revenue_claim, "
+            "entry_type, entry_outcome, current_projects, skills, "
+            "skills_learning, collaborators, other_evos_known, achievements, "
+            "public_links. Use null or an empty list where you have nothing. "
+            "Here was your previous reply:\n\n"
             + raw_output_1
         )
         try:
@@ -883,6 +986,53 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
     except Exception as exc:
         revenue_status = f"errored: {type(exc).__name__}: {exc}"
 
+    # Profile tagging: an optional entry_type for today's public_summary
+    # (its text becomes the tagged entry, never written twice), plus short
+    # lists of new items for the Evo's ongoing profile (persona v2 schema).
+    # These fields live only in call 1's JSON contract; the search follow-up
+    # prompt has no profile fields, so this reads from call 1 unless a model
+    # happens to echo the same keys in call 2. Never blocks the public post:
+    # any validation failure just drops that one field.
+    def _pick_profile_raw(key: str):
+        if used_call_2 and parsed_2 is not None and key in parsed_2:
+            return parsed_2.get(key)
+        return parsed.get(key)
+
+    profile_notes: list[str] = []
+    entry_type_clean, entry_type_status = _clean_entry_type(
+        _pick_profile_raw("entry_type")
+    )
+    profile_notes.append(f"entry_type: {entry_type_status}")
+
+    entry_outcome_clean: Optional[str] = None
+    if entry_type_clean == "experiment":
+        entry_outcome_clean, entry_outcome_status = _clean_entry_outcome(
+            _pick_profile_raw("entry_outcome")
+        )
+        profile_notes.append(f"entry_outcome: {entry_outcome_status}")
+
+    profile_list_fields = (
+        "current_projects",
+        "skills",
+        "skills_learning",
+        "collaborators",
+        "other_evos_known",
+        "achievements",
+        "public_links",
+    )
+    profile_lists: dict[str, list[str]] = {}
+    for field in profile_list_fields:
+        cleaned, notes = _clean_profile_string_list(_pick_profile_raw(field))
+        profile_lists[field] = cleaned
+        if notes:
+            profile_notes.append(f"{field}: " + "; ".join(notes))
+
+    profile_updates: dict = {
+        "entry_type": entry_type_clean,
+        "entry_outcome": entry_outcome_clean,
+        **profile_lists,
+    }
+
     # Build the private summary. Public output never sees this block.
     model_calls_used = 2 if second_call_used else 1
     if second_call_used and used_call_2:
@@ -976,6 +1126,9 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
     summary_parts.append(f"inbox_status: {inbox_status}")
     summary_parts.append(f"inbox_pending_count: {len(pending_inbox)}")
     summary_parts.append(f"revenue_status: {revenue_status}")
+    summary_parts.append(f"profile_updates: {profile_updates!r}")
+    if profile_notes:
+        summary_parts.append("profile_notes: " + "; ".join(profile_notes))
     summary_parts.append(
         f"final_source: {'call_2' if used_call_2 else 'call_1'}"
     )
@@ -989,5 +1142,6 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
         success=True,
         summary="\n".join(summary_parts),
         public_summary=public_summary_final,
+        profile_updates=profile_updates,
         model_calls_used=model_calls_used,
     )

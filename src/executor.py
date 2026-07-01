@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import importlib
+from typing import Optional
 
 from src.memory import State
 from src.openrouter_client import OpenRouterClient
@@ -15,6 +16,11 @@ class TaskResult:
     summary: str
     public_summary: str
     model_calls_used: int = 0
+    # Optional profile-shaping payload from decide_next. When set, wake.py
+    # merges it into the Evo's ongoing profile.json this wake. See
+    # docs/PERSONA_PLAN.md and the Profile model in src/memory.py for the
+    # exact shape. None means "nothing to merge this wake".
+    profile_updates: Optional[dict] = None
 
 
 def run(

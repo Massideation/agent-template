@@ -31,6 +31,7 @@ WAKE_COUNT_FILE = STATE_DIR / "wake_count.json"
 TELEGRAM_FILE = STATE_DIR / "telegram.json"
 EMAIL_FILE = STATE_DIR / "email.json"
 IDENTITY_FILE = STATE_DIR / "identity.json"
+PROFILE_FILE = STATE_DIR / "profile.json"
 
 DEFAULT_DAILY_CALL_LIMIT = 40
 
@@ -47,6 +48,20 @@ SAFE_VOICE_IDS = ["af_heart", "af_bella", "am_adam", "bf_emma"]
 DEFAULT_EMOJI = "*"
 MAX_TAGLINE_LEN = 80
 MAX_VIBE_LEN = 20
+
+# Profile (persona v2) caps. Hatch-time fields are capped once, at hatch.
+# Rolling lists are capped every wake as new entries are merged in.
+MAX_PROFILE_LONG_TEXT_LEN = 600
+MAX_PROFILE_SHORT_TEXT_LEN = 300
+MAX_PROFILE_HATCH_LIST_ITEMS = 8
+MAX_ROLLING_ENTRIES = 20
+MAX_ACHIEVEMENTS = 15
+MAX_CURRENT_PROJECTS = 10
+MAX_SKILLS = 15
+MAX_SKILLS_LEARNING = 10
+MAX_COLLABORATORS = 10
+MAX_OTHER_EVOS_KNOWN = 10
+MAX_PUBLIC_LINKS = 10
 
 # Matches one user-perceived emoji: an extended-pictographic base plus any
 # trailing variation selectors, skin-tone modifiers, and ZWJ-joined sequences.
@@ -171,6 +186,167 @@ def sanitize_presentation(
     )
 
 
+class DatedEntry(BaseModel):
+    """One rolling profile entry: a diary-style line with the date it was
+    added. Used for learning_log, ideas, wins, failures, achievements."""
+
+    date: str
+    text: str
+
+
+class ExperimentEntry(BaseModel):
+    """Like DatedEntry, plus an optional outcome once an experiment resolves."""
+
+    date: str
+    text: str
+    outcome: Optional[str] = None
+
+
+class Profile(BaseModel):
+    """The Evo's ongoing self-profile: persona v2 schema fields.
+
+    Holds the hatch-time character (written once at Wake 1 by
+    reflect_and_name.py), a rolling diary of learning/ideas/experiments/
+    wins/failures/achievements (capped and most-recent-first at render
+    time), agent-updatable deduped lists (current_projects, skills,
+    collaborators, ...), and ever-incrementing counters that never shrink
+    even as the display lists above roll off old entries.
+
+    Persisted to state/profile.json every wake, following the same pattern
+    as the other state/*.json files. Every field defaults to empty so an
+    Evo with no profile yet (pre-hatch, or from before this schema existed)
+    still loads cleanly with an all-empty Profile.
+
+    Fields not carried here (human_partner, hatched_at, current stats.*,
+    treasury) are computed fresh each wake in wake.py from other state
+    (identity.named_at, load_operator_context(), state.level, ...) and are
+    not persisted on this model.
+    """
+
+    # Hatch-time character. All optional; origin_story and mission are
+    # guaranteed non-empty by reflect_and_name.py's deterministic fallback,
+    # but default to "" here so a pre-hatch or legacy Profile still loads.
+    origin_story: str = ""
+    mission: str = ""
+    core_values: list[str] = Field(default_factory=list)
+    strengths: list[str] = Field(default_factory=list)
+    weaknesses: list[str] = Field(default_factory=list)
+    dreams: str = ""
+    long_term_vision: str = ""
+    motivation: str = ""
+    why_i_exist: str = ""
+    decision_style: str = ""
+    favorite_tools: list[str] = Field(default_factory=list)
+
+    # Rolling diary. Each list is capped to its MAX_* constant as new
+    # entries are merged in by wake.py; oldest entries drop off first.
+    learning_log: list[DatedEntry] = Field(default_factory=list)
+    ideas: list[DatedEntry] = Field(default_factory=list)
+    experiments: list[ExperimentEntry] = Field(default_factory=list)
+    wins: list[DatedEntry] = Field(default_factory=list)
+    failures: list[DatedEntry] = Field(default_factory=list)
+    achievements: list[DatedEntry] = Field(default_factory=list)
+
+    # Agent-updatable, deduped lists.
+    current_projects: list[str] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
+    skills_learning: list[str] = Field(default_factory=list)
+    collaborators: list[str] = Field(default_factory=list)
+    other_evos_known: list[str] = Field(default_factory=list)
+    public_links: list[str] = Field(default_factory=list)
+
+    # Ever-incrementing counters, mirrored onto persona.json stats each wake.
+    # These count lifetime totals, independent of the capped display lists
+    # above, so a rolled-off entry is never lost from the stat.
+    tasks_completed: int = 0
+    ideas_generated: int = 0
+    experiments_run: int = 0
+    wins_count: int = 0
+    failures_count: int = 0
+    projects_launched: int = 0
+
+    # Private dedupe helper. The persona v2 schema calls this "_seen_projects";
+    # Pydantic v2 rejects leading-underscore field names, so it is named
+    # without one here. Tracks every project name ever added to
+    # current_projects so projects_launched increments only for genuinely
+    # new names. Never copied onto the public persona.json payload.
+    seen_projects: list[str] = Field(default_factory=list)
+
+
+def sanitize_profile_hatch_fields(
+    raw: dict, style_check: Callable[[str], list]
+) -> dict:
+    """Coerce a raw model dict into safe hatch-time Profile fields. Never raises.
+
+    Mirrors sanitize_presentation's defensiveness: bad input collapses to an
+    empty string or empty list, never an error, and never blocks the rest of
+    the hatch. Long text fields (origin_story, mission, dreams,
+    long_term_vision, motivation, why_i_exist, decision_style) are capped at
+    MAX_PROFILE_LONG_TEXT_LEN characters. List fields (core_values,
+    strengths, weaknesses, favorite_tools) are capped to
+    MAX_PROFILE_HATCH_LIST_ITEMS items, each item capped at
+    MAX_PROFILE_SHORT_TEXT_LEN characters. Every string is run through
+    style_check; a violation drops just that string (or that list item), not
+    the whole field.
+
+    Returns a flat dict with exactly these keys: origin_story, mission,
+    core_values, strengths, weaknesses, dreams, long_term_vision,
+    motivation, why_i_exist, decision_style, favorite_tools. Callers merge
+    this into a Profile (origin_story/mission get the deterministic fallback
+    applied on top when still empty).
+    """
+    raw = raw if isinstance(raw, dict) else {}
+
+    def clean_string(value, max_len: int) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        if len(text) > max_len:
+            text = text[:max_len].rstrip()
+        try:
+            if style_check(text):
+                return ""
+        except Exception:
+            return ""
+        return text
+
+    def clean_list(value, max_items: int, max_item_len: int) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        cleaned: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                continue
+            candidate = clean_string(item, max_item_len)
+            if candidate:
+                cleaned.append(candidate)
+            if len(cleaned) >= max_items:
+                break
+        return cleaned
+
+    long_text_fields = (
+        "origin_story",
+        "mission",
+        "dreams",
+        "long_term_vision",
+        "motivation",
+        "why_i_exist",
+        "decision_style",
+    )
+    list_fields = ("core_values", "strengths", "weaknesses", "favorite_tools")
+
+    clean: dict = {}
+    for field in long_text_fields:
+        clean[field] = clean_string(raw.get(field), MAX_PROFILE_LONG_TEXT_LEN)
+    for field in list_fields:
+        clean[field] = clean_list(
+            raw.get(field),
+            MAX_PROFILE_HATCH_LIST_ITEMS,
+            MAX_PROFILE_SHORT_TEXT_LEN,
+        )
+    return clean
+
+
 class State(BaseModel):
     identity: Optional[Identity] = None
     quota: QuotaState
@@ -179,6 +355,7 @@ class State(BaseModel):
     wake_count: int
     telegram: TelegramState = Field(default_factory=TelegramState)
     email: EmailState = Field(default_factory=EmailState)
+    profile: Profile = Field(default_factory=Profile)
 
 
 def _today_local() -> str:
@@ -245,6 +422,9 @@ def load_state() -> State:
     email_raw = _read_json(EMAIL_FILE)
     email = EmailState(**email_raw) if email_raw else EmailState()
 
+    profile_raw = _read_json(PROFILE_FILE)
+    profile = Profile(**profile_raw) if profile_raw else Profile()
+
     return State(
         identity=identity,
         quota=quota,
@@ -253,6 +433,7 @@ def load_state() -> State:
         wake_count=wake_count,
         telegram=telegram,
         email=email,
+        profile=profile,
     )
 
 
@@ -282,6 +463,8 @@ def save_state(state: State) -> None:
     _atomic_write_json(TELEGRAM_FILE, state.telegram.model_dump())
 
     _atomic_write_json(EMAIL_FILE, state.email.model_dump())
+
+    _atomic_write_json(PROFILE_FILE, state.profile.model_dump())
 
 
 def append_memory(line: str) -> None:

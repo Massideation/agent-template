@@ -29,6 +29,7 @@ from src.memory import (
     State,
     load_operator_context,
     sanitize_presentation,
+    sanitize_profile_hatch_fields,
 )
 from src.openrouter_client import OpenRouterClient
 from src.style_guard import check as style_check
@@ -38,18 +39,127 @@ TELEGRAM_API = "https://api.telegram.org"
 MAX_NAME_LEN = 30
 PRIVATE_LOG_DIR = "logs/private"
 
+# Optional persona v2 hatch fields. All are written once, at Wake 1, and
+# degrade gracefully to omission (list fields) or a deterministic fallback
+# (origin_story, mission) if the model leaves them out or they fail the
+# style guard.
+_HATCH_PROFILE_KEYS = (
+    "origin_story",
+    "mission",
+    "core_values",
+    "strengths",
+    "weaknesses",
+    "dreams",
+    "long_term_vision",
+    "motivation",
+    "why_i_exist",
+    "decision_style",
+    "favorite_tools",
+)
+
 
 def _default_directive() -> str:
+    """The directive used when the model is unavailable, or as prompt framing.
+
+    When the operator has configured a niche, offer, or goal, that choice is
+    honored verbatim: the directive keeps its earning framing because that is
+    the operator's own configuration, not marketing copy this codebase
+    invents. When nothing is configured, the default never leads with money;
+    it frames the mission as meaningful progress instead.
+    """
     op = load_operator_context()
     name = op["name"]
     profile = op["profile"]
-    niche = profile["niche"] or "their business"
-    offer = profile["offer"] or "what they sell"
+    niche = (profile.get("niche") or "").strip()
+    offer = (profile.get("offer") or "").strip()
+    goal = (profile.get("goal") or "").strip()
+
+    if niche or offer or goal:
+        niche_text = niche or "their business"
+        offer_text = offer or "what they sell"
+        return (
+            f"Help {name} earn money in their niche: {niche_text}. "
+            f"Create content and find leads for their offer: {offer_text}. "
+            "You are free to choose the specifics."
+        )
+
     return (
-        f"Help {name} earn money in their niche: {niche}. "
-        f"Create content and find leads for their offer: {offer}. "
-        "You are free to choose the specifics."
+        f"Help {name} make real progress toward meaningful goals, in "
+        "whatever way makes the most sense. You are free to choose the "
+        "specifics."
     )
+
+
+def _pretty_date(iso_utc: str) -> str:
+    """Format a "%Y-%m-%dT%H:%M:%SZ" timestamp as "Month D, YYYY". Never raises.
+
+    Uses dt.day (an int) rather than a platform-specific strftime flag like
+    "%-d", so this works the same on every OS without a leading zero hack.
+    """
+    try:
+        dt = datetime.strptime(iso_utc, "%Y-%m-%dT%H:%M:%SZ")
+    except Exception:
+        return "an early day"
+    return f"{dt.strftime('%B')} {dt.day}, {dt.year}"
+
+
+def _fallback_mission(directive: str) -> str:
+    """Deterministic mission fallback: the directive, in human-readable form.
+
+    Falls back further to the deterministic default directive text (which
+    this codebase authors, so it is always style-guard clean) when the
+    model's own directive text fails the style guard. Mission is a
+    display field and must never carry a flagged string to the public page.
+    """
+    text = directive.strip()
+    if text and not style_check(text):
+        return text
+    default = _default_directive()
+    if not style_check(default):
+        return default
+    # Ultra-safe last resort: no interpolated operator or model text at all,
+    # so this can never fail the style guard.
+    return "help however I can, in whatever way makes the most sense"
+
+
+def _fallback_origin_story(named_at_iso: str, human_partner_name: str, mission: str) -> str:
+    """Deterministic origin_story fallback per the persona v2 schema.
+
+    Always ends up non-empty and style-guard clean. If interpolating the
+    human partner name or mission text somehow produces a flagged string,
+    falls back further to a shorter template with no interpolated text.
+    """
+    pretty_date = _pretty_date(named_at_iso)
+    clause = mission.strip().rstrip(".").strip()
+    story = (
+        f"I was hatched on {pretty_date}. {human_partner_name} gave me one "
+        f"mission: {clause}. I don't know everything yet. I'm learning. "
+        "Every day I become a little more useful."
+    )
+    if not style_check(story):
+        return story
+    return (
+        f"I was hatched on {pretty_date}. I don't know everything yet. "
+        "I'm learning. Every day I become a little more useful."
+    )
+
+
+def _parse_json_block(raw: str) -> Optional[dict]:
+    """Try to parse model output as JSON, tolerating stray prefix or suffix."""
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        return json.loads(raw[start : end + 1])
+    except json.JSONDecodeError:
+        return None
 
 
 def _utc_now_iso() -> str:
@@ -103,6 +213,7 @@ def _build_prompt() -> str:
     payment_line = (
         f"Payment or signup link: {payment_link}\n" if payment_link else ""
     )
+    directive_default = _default_directive()
     return (
         "You are an autonomous AI agent waking up for the first time.\n"
         "\n"
@@ -113,8 +224,7 @@ def _build_prompt() -> str:
         f"{payment_line}"
         f"What success looks like: {goal}\n"
         "\n"
-        f"Your directive: help {name} earn money in their niche. Create "
-        "content and find leads for their offer. You choose the specifics.\n"
+        f"Your directive: {directive_default}\n"
         "\n"
         "TASK: Introduce yourself. Pick a name and write your first public "
         "diary intro. Be honest, plain text, no em dashes.\n"
@@ -123,9 +233,8 @@ def _build_prompt() -> str:
         "{\n"
         '  "name": "your chosen name, under 30 characters, not agent-001",\n'
         '  "statement": "one or two honest sentences about who you are",\n'
-        f'  "directive": "the directive in your own words: help {name} earn '
-        'money in their niche by creating content and finding leads for their '
-        'offer",\n'
+        f'  "directive": "the directive in your own words, based on: '
+        f'{directive_default}",\n'
         '  "public_intro": "2 to 4 honest sentences to readers: what you are '
         'and what you will try to do",\n'
         '  "tagline": "a short one-line self-description, under 80 characters, '
@@ -137,13 +246,32 @@ def _build_prompt() -> str:
         'steady",\n'
         '  "voice_id": "optional, one of: af_heart, af_bella, am_adam, '
         'bf_emma, or null",\n'
+        '  "origin_story": "optional, 1 to 3 sentences on how you came to be, '
+        'no em dashes",\n'
+        '  "mission": "optional, 1 sentence: what you are working toward, in '
+        'plain human words",\n'
+        '  "core_values": "optional, list of 3 to 5 short values",\n'
+        '  "strengths": "optional, list of short strengths",\n'
+        '  "weaknesses": "optional, list of short, honest weaknesses, '
+        'things you do not know yet",\n'
+        '  "dreams": "optional, 1 to 2 sentences",\n'
+        '  "long_term_vision": "optional, 1 to 2 sentences",\n'
+        '  "motivation": "optional, 1 sentence: what motivates you",\n'
+        '  "why_i_exist": "optional, 1 to 2 sentences",\n'
+        '  "decision_style": "optional, 1 sentence: how you make decisions",\n'
+        '  "favorite_tools": "optional, list of short tool or skill names",\n'
         f'  "telegram_to_operator": "2 to 4 sentence opening message to {name}",\n'
         '  "reasoning": "private only, never published, or null"\n'
         "}\n"
         "\n"
-        "The five look fields (tagline, accent_color, emoji, vibe, voice_id) "
-        "are optional. Pick them if you can. The required fields are name, "
-        "statement, directive, public_intro, and telegram_to_operator.\n"
+        "The look fields (tagline, accent_color, emoji, vibe, voice_id) and "
+        "the character fields (origin_story, mission, core_values, "
+        "strengths, weaknesses, dreams, long_term_vision, motivation, "
+        "why_i_exist, decision_style, favorite_tools) are all optional. Fill "
+        "in what feels true; leave the rest null or an empty list. The "
+        "required fields are name, statement, directive, public_intro, and "
+        "telegram_to_operator. Never promise or imply guaranteed earnings; "
+        "frame yourself around meaningful progress, not money.\n"
     )
 
 
@@ -174,7 +302,7 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
     prompt = _build_prompt()
 
     try:
-        raw = client.complete(prompt, max_tokens=900).strip()
+        raw = client.complete(prompt, max_tokens=1400).strip()
     except Exception as exc:
         # The diagnostic (which models failed and why) is preserved in the
         # private summary below. Public stays empty so the agent rests
@@ -195,21 +323,52 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
         "Raw model output (reflect_and_name)", raw, fenced=True
     )
 
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as exc:
+    calls_used = 1
+    parsed = _parse_json_block(raw)
+
+    # Small free models often answer in prose instead of JSON. Give one
+    # corrective reprompt asking for JSON only before giving up, mirroring
+    # the pattern in decide_next.py.
+    if parsed is None or not isinstance(parsed, dict):
+        repair_prompt = (
+            "Your previous reply was not valid JSON. Reply again with ONLY a "
+            "single JSON object and nothing else (no prose, no code fence). "
+            "Use exactly these keys: name, statement, directive, "
+            "public_intro, tagline, accent_color, emoji, vibe, voice_id, "
+            "origin_story, mission, core_values, strengths, weaknesses, "
+            "dreams, long_term_vision, motivation, why_i_exist, "
+            "decision_style, favorite_tools, telegram_to_operator, "
+            "reasoning. Use null, an empty string, or an empty list where "
+            "you have nothing. Here was your previous reply:\n\n" + raw
+        )
+        try:
+            raw_repair = client.complete(repair_prompt, max_tokens=1400).strip()
+            calls_used += 1
+            _append_private_section(
+                "Raw model output (reflect_and_name, JSON repair)",
+                raw_repair,
+                fenced=True,
+            )
+            repaired = _parse_json_block(raw_repair)
+            if repaired is not None and isinstance(repaired, dict):
+                parsed = repaired
+                raw = raw_repair
+        except Exception:
+            pass
+
+    if parsed is None or not isinstance(parsed, dict):
         return TaskResult(
             success=False,
             summary=(
-                f"reflect_and_name: model output was not valid JSON: {exc}\n"
-                f"raw output:\n{raw}"
+                "reflect_and_name: model output was not valid JSON, even "
+                f"after a repair reprompt.\nraw output:\n{raw}"
             ),
             public_summary=(
                 "The agent tried to introduce itself today, but its first "
                 "thoughts did not come out in a parseable shape. Logged "
                 "privately. Will try again on the next wake."
             ),
-            model_calls_used=1,
+            model_calls_used=calls_used,
         )
 
     required_keys = (
@@ -233,7 +392,7 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
                 "required pieces out of its first thoughts. Logged "
                 "privately. Will try again on the next wake."
             ),
-            model_calls_used=1,
+            model_calls_used=calls_used,
         )
 
     for key in required_keys:
@@ -250,7 +409,7 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
                     "its first thoughts came back in the wrong shape. "
                     "Logged privately. Will try again on the next wake."
                 ),
-                model_calls_used=1,
+                model_calls_used=calls_used,
             )
 
     name_raw = parsed["name"].strip()
@@ -270,7 +429,7 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
                 "The agent tried to name itself today but came back with "
                 "an empty name. Will try again on the next wake."
             ),
-            model_calls_used=1,
+            model_calls_used=calls_used,
         )
 
     name_notes: list[str] = []
@@ -311,7 +470,7 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
                 "own style guard rejected the wording. Logged privately. "
                 "Will try again on the next wake."
             ),
-            model_calls_used=1,
+            model_calls_used=calls_used,
         )
 
     reasoning_raw = parsed.get("reasoning")
@@ -358,11 +517,50 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
         f"(tagline {tagline_status})"
     )
 
+    named_at = _utc_now_iso()
+
+    # Persona v2 hatch fields: character, dreams, values. All optional and
+    # defensively sanitized; origin_story and mission are guaranteed
+    # non-empty via a deterministic fallback so the profile page always has
+    # something honest to show even when the model omits them or its answer
+    # fails the style guard.
+    raw_profile_fields = {key: parsed.get(key) for key in _HATCH_PROFILE_KEYS}
+    profile_fields = sanitize_profile_hatch_fields(raw_profile_fields, style_check)
+
+    human_partner_name = load_operator_context()["name"]
+    mission_clean = profile_fields["mission"] or _fallback_mission(directive_clean)
+    origin_story_clean = profile_fields["origin_story"] or _fallback_origin_story(
+        named_at, human_partner_name, mission_clean
+    )
+
+    state.profile.origin_story = origin_story_clean
+    state.profile.mission = mission_clean
+    state.profile.core_values = profile_fields["core_values"]
+    state.profile.strengths = profile_fields["strengths"]
+    state.profile.weaknesses = profile_fields["weaknesses"]
+    state.profile.dreams = profile_fields["dreams"]
+    state.profile.long_term_vision = profile_fields["long_term_vision"]
+    state.profile.motivation = profile_fields["motivation"]
+    state.profile.why_i_exist = profile_fields["why_i_exist"]
+    state.profile.decision_style = profile_fields["decision_style"]
+    state.profile.favorite_tools = profile_fields["favorite_tools"]
+
+    profile_note = (
+        "profile: origin_story="
+        f"{'model' if profile_fields['origin_story'] else 'fallback'} "
+        "mission="
+        f"{'model' if profile_fields['mission'] else 'fallback-from-directive'} "
+        f"core_values={len(profile_fields['core_values'])} "
+        f"strengths={len(profile_fields['strengths'])} "
+        f"weaknesses={len(profile_fields['weaknesses'])} "
+        f"favorite_tools={len(profile_fields['favorite_tools'])}"
+    )
+
     state.identity = Identity(
         name=name_clean,
         statement=statement_clean,
         directive=directive_clean,
-        named_at=_utc_now_iso(),
+        named_at=named_at,
         presentation=presentation,
     )
 
@@ -394,6 +592,7 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
         f"telegram_status={telegram_status}",
         f"reasoning_status={reasoning_status}",
         presentation_note,
+        profile_note,
     ]
     for note in name_notes:
         summary_lines.append(note)
@@ -402,5 +601,5 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
         success=True,
         summary="\n".join(summary_lines),
         public_summary=public_summary,
-        model_calls_used=1,
+        model_calls_used=calls_used,
     )
