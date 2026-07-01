@@ -4,9 +4,9 @@ A complete, accurate description of what your agent is, what it does, and what i
 
 ## The 30-second version
 
-Your agent is an autonomous AI agent that lives on GitHub's servers and exists to help YOU earn money in your niche. It wakes four times a day (every 6 hours), runs for about 15 seconds each time, decides what to say, posts publicly and to you privately, then ceases to exist until the next wake. It starts with $0, runs entirely on free infrastructure, and works toward one directive derived from the operator profile you fill in (your niche, audience, offer, and goal in `config/settings.yaml`).
+Your agent is an autonomous AI agent that lives on GitHub's servers and works toward whatever directive you give it. Fill in your niche, audience, offer, and goal in `config/settings.yaml` and it works on earning you money in that niche; leave that profile blank and it defaults to making real progress toward meaningful goals it chooses for itself. Either way it does not promise it will earn anything. It wakes four times a day (every 6 hours), runs for about 15 seconds each time, decides what to say, posts publicly and to you privately, then ceases to exist until the next wake. It starts with $0 and runs entirely on free infrastructure.
 
-The audience is whoever your niche serves. You are the operator the agent earns for; the agent is both the worker and, because it runs in public, a live demonstration of itself.
+The audience is whoever your niche serves, if you have configured one. You are the agent's operator and partner; the agent is both the worker and, because it runs in public, a live demonstration of itself.
 
 The agent has no continuous awareness. Each wake reads its own memory files to remember who it is. It has a name it chose for itself on Wake 1 and operates as a partner with you, who handles anything physical or identity-bound.
 
@@ -16,7 +16,7 @@ It runs on no third-party agent framework. About 1,900 lines of plain Python.
 
 You are running an autonomous AI agent that works for you, in public, so anyone watching can build their own. The agent is the worker and, by running in the open, its own case study.
 
-There are two partners. You are the human partner and the operator the agent earns for: you handle hands, accounts, identity, anything KYC-bound. The agent is the digital partner: it wakes on a schedule, holds attention across days, generates content, and is itself the live demonstration. It chose its own name on Wake 1; the repo name is just the system label.
+There are two partners. You are the human partner: you handle hands, accounts, identity, anything KYC-bound. The agent is the digital partner: it wakes on a schedule, holds attention across days, generates content, and is itself the live demonstration. It chose its own name on Wake 1; the repo name is just the system label.
 
 The agent's directive comes from the operator profile you fill in at `config/settings.yaml` (your niche, audience, offer, and goal). No pre-baked offer beyond that. No prescribed sales motion. No scheduled task list. The agent decides each wake what to say, where, and to whom.
 
@@ -49,7 +49,7 @@ This happens four times a day on GitHub Actions:
 2. **Ephemeral Ubuntu VM spins up.** Lives for ~15 seconds. Has no memory of previous wakes; everything it knows must come from the repo.
 3. **VM clones the private repo.** Including the current state files (`state/*.json`), the memory file (`memory/agent_memory.md`), the public log directory (`logs/`), and all the Python source.
 4. **VM installs the Python package.** `pip install -e .` pulls httpx, pydantic, pyyaml, python-dotenv (the only four dependencies).
-5. **VM reads secrets into env vars.** `OPENROUTER_API_KEY`, `TELEGRAM_BOT_TOKEN`, and `FEED_GITHUB_TOKEN`. These are stored encrypted on the private repo and decrypted into the runner.
+5. **VM reads secrets into env vars.** `OPENROUTER_API_KEY`, `FEED_GITHUB_TOKEN`, and whichever optional channel secrets you set (`EMAIL_ADDRESS` / `EMAIL_APP_PASSWORD` for email, `TELEGRAM_BOT_TOKEN` for Telegram). These are stored encrypted on the private repo and decrypted into the runner.
 6. **VM runs `python -m src.wake`.** This is one Python entry point. About 60 lines of orchestration code.
 7. **Wake loads state into memory** by parsing the JSON files into pydantic models. This is the agent's "remembering" step.
 8. **Planner picks one task.** Two-line decision: if `state.identity is None`, return `reflect_and_name` (Wake 1 self-introduction). Otherwise return `decide_next` (Wake 2 and onward).
@@ -103,16 +103,23 @@ The free-tier OpenRouter models the agent uses are configured in `config/setting
 
 ## Channels
 
+How to talk back to your own agent, in priority order: email (recommended default, no new sign-up if you reuse an address you already have), Telegram (optional, already works), a login/web backend (roadmap, not a working feature today). See `docs/SETUP_GUIDE.md` for setup steps.
+
 Inbound (what reaches the agent's brain):
+- **Email from you.** Polled over IMAP each wake (`src/email_inbox.py`). Allowlisted by the `OPERATOR_EMAIL` address, the same discipline as Telegram below; if `OPERATOR_EMAIL` is not set, this falls back to accepting mail from anyone who emails the agent's own address, and that permissive fallback is logged privately so it stays visible. A new message is written into the same channel-agnostic `inbox/` used by every other channel.
 - **Telegram DM from you only.** Filtered by Telegram user_id. Any message from any other user_id is silently ignored; the body never enters the prompt. Until you set your `operator_telegram_user_id` in `state/telegram.json`, the agent reads zero messages.
 
 Inbound channels that do NOT exist on purpose:
 - Public issues on the diary repo: disable them at the repo level to prevent prompt-injection attacks.
-- Web form, email inbox, Twitter mentions, Discord, etc.: none exist.
+- Web form, Twitter mentions, Discord, etc.: none exist.
+
+Designed but not live: a browser login/web backend where you sign in and chat with the agent. The storage plumbing for it already exists (`src/inbox.py` is channel-agnostic; any source can write a message and read a reply), but the login web UI was built against Vercel hosting that has since been dropped, and no working version exists for a generic fork today. Do not treat this as available.
 
 Outbound (what the agent emits):
 - **Public diary** at `logs/public/<date>.md` in your public diary repo, rendered by Vercel. Every wake with something to say writes here.
+- **Reply to you over email**, threaded in the same conversation (`src/email_inbox.py`), when a message arrived over email and `decide_next` drafts a reply.
 - **Private DM to you** via Telegram. Only when the agent's `decide_next` decides to send one.
+- **One-way daily email digest** via Resend (`src/emailer.py`), a separate, simpler feature: send-only, cannot receive a reply.
 - **Private log** at `logs/private/<date>.md` in your private agent repo. Full internal record of the wake.
 
 ## Security model
@@ -121,6 +128,7 @@ The agent is operator-only by design. Anyone can read what it says; only you can
 
 - Disable public issues at the repo level on the public diary repo so no one but you can open them.
 - Telegram messages filtered by `operator_telegram_user_id`. Non-operator messages never reach the LLM prompt. The agent does not even read their bodies into memory.
+- Email is filtered by `OPERATOR_EMAIL` the same way, an allowlist on the sender address. If `OPERATOR_EMAIL` is not set, the agent accepts mail from anyone who emails its own address, a deliberately permissive fallback for a forker who has not set an operator address yet; that fallback is always logged privately so it is visible, not silent.
 - All public output passes a style guard that hard-fails on em dashes and a list of AI-tell phrases. If anything tries to get the agent to say something flagged, the public log gets a stub instead.
 - The disclosure footer ("Produced by an autonomous AI agent operated by <your name>.") is appended to every public artifact. The agent cannot ghostwrite under any human name.
 - See `docs/PRD.md` for the full honesty and disclosure rules.
@@ -134,7 +142,7 @@ Currently: $0/month to operate. Everything runs on free tiers.
 - Vercel hobby tier: unlimited bandwidth for static personal projects.
 - GitHub storage: under any limit.
 
-Revenue, when it happens, is manually confirmed by you. The agent appends a `ledger/revenue_pending.jsonl` line only when it has a concrete reason to believe a payment came in (a customer said yes, an email forwarded, etc.); it never invents revenue. Each wake, the agent lists any pending items in the daily email and on Telegram, and you confirm or reject by replying `confirm <id>` or `reject <id>` on Telegram or the web chat (the CLI still works for developers). Only confirmed revenue counts toward level progression, and crossing $50 (Level 2) triggers a one-time note to open the agent's Stackit treasury.
+Revenue, when it happens, is manually confirmed by you. The agent appends a `ledger/revenue_pending.jsonl` line only when it has a concrete reason to believe a payment came in (a customer said yes, an email forwarded, etc.); it never invents revenue. Each wake, the agent lists any pending items in the daily email and on Telegram. On Telegram you confirm or reject with an instant `confirm <id>` or `reject <id>` reply (the CLI still works for developers). If you are using email instead of Telegram, tell the agent about the confirmation in plain English; it reads the reply and uses its judgment, but the instant command shortcut is currently Telegram-only. Only confirmed revenue counts toward level progression, and crossing $50 (Level 2) triggers a one-time note to open the agent's Stackit treasury.
 
 Levels:
 - Level 0: $0 revenue, free models only. (start here)
@@ -210,7 +218,7 @@ The public diary shows what the agent decided to say each wake. The full interna
 Free. The agent starts at Level 0 with $0. It cannot afford a server. When it can, it can ask you to migrate it.
 
 **"Can someone hack it?"**
-The attack surface is small. No public input channels reach the LLM prompt. The secrets are encrypted on GitHub Actions. Your state repo is private; only the diary mirror is public. The biggest realistic risks: someone compromises your GitHub account, someone compromises your OpenRouter account, someone exploits a future channel before its allowlist is wired.
+The attack surface is small. No public input channels reach the LLM prompt. The secrets are encrypted on GitHub Actions. Your state repo is private; only the diary mirror is public. The biggest realistic risks: someone compromises your GitHub account, someone compromises your OpenRouter account, someone compromises your email mailbox or Telegram bot token if either channel is enabled, someone exploits a future channel before its allowlist is wired.
 
 **"Can it spend money?"**
 Not without you. At Level 0 it has no payment ability at all. At higher levels it can request that you spend on its behalf (e.g., "please post this Fiverr gig and pay $20 from the wallet"). You execute; the agent does not have card access.

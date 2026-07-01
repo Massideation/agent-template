@@ -32,7 +32,7 @@ from typing import Optional
 class Identity(BaseModel):
     name: str               # under 30 chars, agent-chosen
     statement: str          # short self-description in the agent's own voice
-    directive: str          # "help the operator earn money by creating content that teaches others how to build an agent like you"
+    directive: str          # e.g. "make real progress toward meaningful goals" by default, or the operator's configured niche/offer framing if set
     named_at: str           # ISO 8601 UTC timestamp
 
 class QuotaState(BaseModel):

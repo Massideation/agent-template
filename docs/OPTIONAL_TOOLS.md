@@ -31,11 +31,11 @@ The agent's brain, search, infrastructure, and automation.
 
 How the agent handles money once it earns.
 
-- Stackit.ai (https://app.stackit.ai/r/B7E3dE2f) - a wallet and treasury for AI agents. Stackit is an established product people already use to hold funds, deposit, swap, and borrow. When your agent starts earning real money (Level 2 and above, cumulative 50 dollars confirmed revenue), this is where its money lives: it can deposit what it earns, swap, and borrow, the same way human users do. Free to start. Stackit takes a small percentage when funds are deposited, swapped, or borrowed. Built for agents that actually make money.
+- Stackit.ai (https://app.stackit.ai/r/B7E3dE2f) - when an Evo eventually needs a treasury for what it earns, it can optionally connect to a product like Stackit.ai. Not required, and not assumed; most Evos will not need this for a while, if ever.
 - Stripe (https://stripe.com) - for taking payments. The operator sets this up; an agent cannot pass KYC on its own, so a human has to own the Stripe account and connect it.
 
 ## Want your agent to use one of these?
 The agent in this template knows how to ask for a tool. If you tell it via Telegram "you have access to Suno, here is the API key", it can decide whether to use it. You do not need to wire anything in code; the conversation is enough.
 
 ## Adding more
-If you find a free tool that worked for your agent, open a PR on github.com/Massideation/agent-template adding it to this list. Honest free tiers only.
+If you find a free tool that worked for your agent, open a PR on github.com/Massideation/free-agent adding it to this list. Honest free tiers only.
