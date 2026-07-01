@@ -618,6 +618,27 @@ def main() -> int:
         # 5. Build client (None in dry-run or when no api key).
         client = _build_client(state, settings, args.dry_run)
 
+        # 5b. Poll the email inbox (if configured) before executing the
+        # task, so an email that just arrived is visible to THIS wake's
+        # decide_next call rather than only next wake's. Imported lazily
+        # and guarded, the same way src.voice is below, so the wake still
+        # runs fine on an older checkout before this module exists. Any
+        # failure here is logged privately and never stops the wake.
+        try:
+            from src import email_inbox  # type: ignore
+
+            check_outcome = email_inbox.check_and_enqueue()
+            logger.write_private(
+                today_iso,
+                f"email_inbox.check_and_enqueue: {check_outcome}",
+            )
+        except Exception as exc:
+            logger.write_private(
+                today_iso,
+                f"email_inbox.check_and_enqueue unavailable or raised: "
+                f"{type(exc).__name__}",
+            )
+
         # 6. Execute.
         result = executor.run(task_name, state, client)
 
@@ -641,6 +662,26 @@ def main() -> int:
             logger.write_private(
                 today,
                 f"wake {state.wake_count + 1}: resting, no public output this hour",
+            )
+
+        # 7b. Deliver any email replies drafted this wake (or a prior wake
+        # that had not yet sent) so a reply goes out the same wake it was
+        # written. Imported lazily and guarded, same reasoning as 5b above:
+        # never stops the wake, degrades to a clean skip when unconfigured
+        # or on an older checkout before this module exists.
+        try:
+            from src import email_inbox  # type: ignore
+
+            deliver_outcome = email_inbox.deliver_pending_replies()
+            logger.write_private(
+                today,
+                f"email_inbox.deliver_pending_replies: {deliver_outcome}",
+            )
+        except Exception as exc:
+            logger.write_private(
+                today,
+                f"email_inbox.deliver_pending_replies unavailable or raised: "
+                f"{type(exc).__name__}",
             )
 
         # 8. Update wake metadata.

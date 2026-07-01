@@ -1,8 +1,11 @@
 """inbox: file-based operator inbox living inside the agent repo.
 
-The admin web UI (in the public diary repo) writes operator messages to
-inbox/<unix-millis>.md via the GitHub Contents API. This module is the
-agent-side reader. It runs during decide_next:
+Channel-agnostic: any source can write a message file to
+inbox/<unix-millis>.md and this module's readers/writers do not care which
+one. Today that includes src/email_inbox.py (polls IMAP, writes an
+inbox/<id>.email.json sidecar alongside the .md file) and the admin web UI
+in the public diary repo (writes via the GitHub Contents API). This module
+is the agent-side reader. It runs during decide_next:
 
 - list_pending_messages() reads inbox/*.md (skipping inbox/processed/)
   and returns {id, ts, content} dicts so the agent can include them in
@@ -95,6 +98,14 @@ def write_reply(message_id: str, reply_text: str) -> Optional[Path]:
 def mark_processed(message_id: str) -> Optional[Path]:
     """Move inbox/<id>.md into inbox/processed/<id>.md.
 
+    If a sidecar inbox/<id>.email.json also exists (written by
+    src/email_inbox.py for a message that arrived over email), it is moved
+    alongside into inbox/processed/<id>.email.json so
+    email_inbox.deliver_pending_replies() can still find it once the
+    original inbox message has been archived. The sidecar move is best
+    effort: a failure there is swallowed so it never blocks archiving the
+    main message.
+
     Creates the processed dir if missing. Defensive: returns None on any
     error.
     """
@@ -107,6 +118,18 @@ def mark_processed(message_id: str) -> Optional[Path]:
         PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
         dst = PROCESSED_DIR / f"{message_id}.md"
         src.replace(dst)
+
+        try:
+            sidecar_src = INBOX_DIR / f"{message_id}.email.json"
+            if sidecar_src.exists() and sidecar_src.is_file():
+                sidecar_dst = PROCESSED_DIR / f"{message_id}.email.json"
+                sidecar_src.replace(sidecar_dst)
+        except Exception as exc:
+            print(
+                f"warning: inbox.mark_processed sidecar move failed for "
+                f"{message_id}: {exc}"
+            )
+
         return dst
     except Exception as exc:
         print(f"warning: inbox.mark_processed failed for {message_id}: {exc}")
