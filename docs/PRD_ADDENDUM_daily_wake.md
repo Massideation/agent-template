@@ -63,6 +63,6 @@ Example:
 
 ## 7. Product Principle
 
-The agent should not become more active because Miguel gives it money.
+The agent should not become more active because the operator gives it money.
 
 It should become more active because it earns the right to operate more.
