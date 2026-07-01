@@ -51,7 +51,9 @@ jobs:
           EMAIL_FROM: ${{ vars.EMAIL_FROM }}
           # Optional two-way email channel (separate from the one-way Resend
           # digest above). Absent EMAIL_ADDRESS / EMAIL_APP_PASSWORD -> off.
-          EMAIL_ADDRESS: ${{ vars.EMAIL_ADDRESS }}
+          # Both are secrets, matching docs/SETUP_GUIDE.md Step 8 so a
+          # by-the-book forker's channel actually activates.
+          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
           EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
           EMAIL_IMAP_HOST: ${{ vars.EMAIL_IMAP_HOST }}
           EMAIL_SMTP_HOST: ${{ vars.EMAIL_SMTP_HOST }}

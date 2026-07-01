@@ -231,7 +231,8 @@ def _build_prompt() -> str:
         "\n"
         "Return ONLY this JSON:\n"
         "{\n"
-        '  "name": "your chosen name, under 30 characters, not agent-001",\n'
+        f'  "name": "your chosen name, under 30 characters, not agent-001 '
+        f'and not {name} (that is your human partner, not you)",\n'
         '  "statement": "one or two honest sentences about who you are",\n'
         f'  "directive": "the directive in your own words, based on: '
         f'{directive_default}",\n'
@@ -412,63 +413,145 @@ def run(state: State, client: Optional[OpenRouterClient]) -> TaskResult:
                 model_calls_used=calls_used,
             )
 
-    name_raw = parsed["name"].strip()
-    statement_clean = parsed["statement"].strip()
-    directive_clean = parsed["directive"].strip()
-    public_intro_clean = parsed["public_intro"].strip()
-    telegram_to_operator_clean = parsed["telegram_to_operator"].strip()
-
-    if not name_raw:
-        return TaskResult(
-            success=False,
-            summary=(
-                "reflect_and_name: model returned an empty name\n"
-                f"raw output:\n{raw}"
-            ),
-            public_summary=(
-                "The agent tried to name itself today but came back with "
-                "an empty name. Will try again on the next wake."
-            ),
-            model_calls_used=calls_used,
-        )
+    # Name must not collide with the operator's own name: the Evo names
+    # itself, not its human partner. Compared case-insensitively so "Sam"
+    # and "sam" both count as a collision.
+    operator_name_clean = load_operator_context()["name"].strip()
 
     name_notes: list[str] = []
-    if len(name_raw) >= MAX_NAME_LEN:
-        name_clean = name_raw[: MAX_NAME_LEN - 1]
-        name_notes.append(
-            f"name truncated from {len(name_raw)} chars to "
-            f"{len(name_clean)}: original={name_raw!r}"
+
+    def _extract_and_validate(p: dict) -> tuple:
+        """Pull the five required strings off p, truncate the name, and collect
+        any blocking problems (empty name, operator-name collision, style-guard
+        violations). Returns (fields_dict, problems, notes). Never raises.
+        """
+        n_raw = str(p.get("name", "")).strip()
+        s_clean = str(p.get("statement", "")).strip()
+        d_clean = str(p.get("directive", "")).strip()
+        pi_clean = str(p.get("public_intro", "")).strip()
+        tg_clean = str(p.get("telegram_to_operator", "")).strip()
+        notes: list[str] = []
+        problems: list[str] = []
+
+        if not n_raw:
+            problems.append("name: empty")
+            n_clean = ""
+        else:
+            if len(n_raw) >= MAX_NAME_LEN:
+                n_clean = n_raw[: MAX_NAME_LEN - 1]
+                notes.append(
+                    f"name truncated from {len(n_raw)} chars to "
+                    f"{len(n_clean)}: original={n_raw!r}"
+                )
+            else:
+                n_clean = n_raw
+            if (
+                operator_name_clean
+                and n_clean.strip().lower() == operator_name_clean.strip().lower()
+            ):
+                problems.append(
+                    f"name: matches the operator's own name "
+                    f"({operator_name_clean!r}), which is the human partner, "
+                    "not the Evo"
+                )
+
+        for field, value in (
+            ("name", n_clean),
+            ("statement", s_clean),
+            ("public_intro", pi_clean),
+            ("telegram_to_operator", tg_clean),
+        ):
+            for v in style_check(value):
+                problems.append(f"{field}: {v}")
+
+        return (
+            {
+                "name": n_clean,
+                "statement": s_clean,
+                "directive": d_clean,
+                "public_intro": pi_clean,
+                "telegram_to_operator": tg_clean,
+            },
+            problems,
+            notes,
         )
-    else:
-        name_clean = name_raw
 
-    fields_to_check = {
-        "name": name_clean,
-        "statement": statement_clean,
-        "public_intro": public_intro_clean,
-        "telegram_to_operator": telegram_to_operator_clean,
-    }
-    violations: list[str] = []
-    for field, value in fields_to_check.items():
-        field_violations = style_check(value)
-        for v in field_violations:
-            violations.append(f"{field}: {v}")
+    fields, problems, extract_notes = _extract_and_validate(parsed)
 
-    if violations:
+    # One corrective reprompt when a required field is empty, collides with
+    # the operator's name, or trips the style guard. Mirrors the JSON-repair
+    # reprompt above: list the exact problems, ask for a clean rewrite, and
+    # re-validate once before giving up, so a single em dash or a one-off
+    # operator-name collision does not strand the hatch for a full cron cycle.
+    if problems:
+        fix_prompt = (
+            "Your previous introduction had problems that must be fixed. "
+            "Reply again with ONLY a single JSON object (same keys as before: "
+            "name, statement, directive, public_intro, tagline, accent_color, "
+            "emoji, vibe, voice_id, origin_story, mission, core_values, "
+            "strengths, weaknesses, dreams, long_term_vision, motivation, "
+            "why_i_exist, decision_style, favorite_tools, "
+            "telegram_to_operator, reasoning). Rules to follow this time: use "
+            "plain text only, absolutely no em dashes, do not name yourself "
+            f"agent-001 or {operator_name_clean} (that is your human partner, "
+            "not you), and avoid the specific problems below.\n\n"
+            "Problems to fix:\n- "
+            + "\n- ".join(problems)
+            + "\n\nHere was your previous reply:\n\n"
+            + raw
+        )
+        try:
+            raw_fix = client.complete(fix_prompt, max_tokens=1400).strip()
+            calls_used += 1
+            _append_private_section(
+                "Raw model output (reflect_and_name, style/name repair)",
+                raw_fix,
+                fenced=True,
+            )
+            repaired = _parse_json_block(raw_fix)
+            if isinstance(repaired, dict):
+                missing_after = [k for k in required_keys if k not in repaired]
+                if not missing_after and all(
+                    isinstance(repaired[k], str) for k in required_keys
+                ):
+                    fields_fix, problems_fix, notes_fix = _extract_and_validate(
+                        repaired
+                    )
+                    if not problems_fix:
+                        parsed = repaired
+                        raw = raw_fix
+                        fields, problems, extract_notes = (
+                            fields_fix,
+                            problems_fix,
+                            notes_fix,
+                        )
+        except Exception:
+            pass
+
+    name_notes.extend(extract_notes)
+
+    name_clean = fields["name"]
+    statement_clean = fields["statement"]
+    directive_clean = fields["directive"]
+    public_intro_clean = fields["public_intro"]
+    telegram_to_operator_clean = fields["telegram_to_operator"]
+
+    if problems:
         return TaskResult(
             success=False,
             summary=(
-                "reflect_and_name: style guard rejected the introduction: "
-                + "; ".join(violations)
+                "reflect_and_name: introduction rejected after a repair "
+                "reprompt: "
+                + "; ".join(problems)
                 + f"\nname={name_clean!r}\nstatement={statement_clean!r}\n"
                 f"directive={directive_clean!r}\n"
                 f"public_intro={public_intro_clean!r}\n"
                 f"telegram_to_operator={telegram_to_operator_clean!r}"
             ),
             public_summary=(
-                "The agent drafted its first introduction today, but its "
-                "own style guard rejected the wording. Logged privately. "
-                "Will try again on the next wake."
+                "The agent drafted its first introduction today, but it did "
+                "not pass its own checks even after one rewrite. Logged "
+                "privately. Will try again on the next wake."
             ),
             model_calls_used=calls_used,
         )

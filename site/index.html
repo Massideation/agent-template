@@ -108,8 +108,8 @@
     input. Every string is HTML-escaped before use (esc()), the accent
     color only ever selects a key from a fixed palette (never a raw
     value), audio_url must match a narrow relative-path pattern before it
-    is ever assigned as a src, and image_url/video_url/public_links must
-    be http(s) before they are ever used as a src or href.
+    is ever assigned as a src, and public_links must be http(s) before they
+    are ever used as an href.
 
     Fork note: the diary repo used for the diary-entries fetch is resolved
     from persona.json's own "repo" field first (set by the wake from
@@ -134,8 +134,13 @@
     // points at the template repo too. Swap this once a real gallery domain
     // is live.
     var EVO_NETWORK_URL = 'https://github.com/Massideation/free-agent';
-    // Fallback diary repo, used only if persona.json carries no "repo" field.
-    var FALLBACK_REPO = 'Massideation/agent-grows-up';
+    // When persona.json carries no "repo" field, try to derive THIS fork's
+    // own diary repo from the page URL (see deriveRepoFromLocation below)
+    // rather than hardcoding any specific repo. If that cannot be derived,
+    // the diary is left empty. It must never fall back to some other author's
+    // repo, or a misconfigured fork would silently display a stranger's diary
+    // on its own profile page.
+    var FALLBACK_REPO = '';
 
     // Fixed safe accent palette. persona.accent_color only ever selects a
     // key here; a bad or missing value falls back to "blue". No raw color
@@ -154,6 +159,27 @@
     }
     function safeText(v) { return typeof v === 'string' ? v.trim() : ''; }
     function isRepoString(s) { return /^[\w.-]+\/[\w.-]+$/.test(s || ''); }
+
+    // Best-effort "owner/repo" for THIS page from its own URL, so a fork whose
+    // persona.json is missing the "repo" field still reads its OWN diary, not
+    // some hardcoded repo. Handles the common GitHub Pages project-site shape
+    // "<owner>.github.io/<repo>/...". Returns '' for user/org root pages and
+    // custom domains, where the coordinates cannot be inferred; callers then
+    // leave the diary empty rather than borrow another author's entries.
+    function deriveRepoFromLocation() {
+      try {
+        var host = String(location.hostname || '');
+        var m = host.match(/^([\w-]+)\.github\.io$/i);
+        if (!m) return '';
+        var owner = m[1];
+        var seg = String(location.pathname || '/').split('/').filter(Boolean);
+        if (!seg.length) return '';
+        var candidate = owner + '/' + seg[0];
+        return isRepoString(candidate) ? candidate : '';
+      } catch (e) {
+        return '';
+      }
+    }
 
     function safeHttpUrl(u) {
       u = String(u || '').trim();
@@ -279,6 +305,12 @@
     async function loadEntries(repo) {
       var target = document.getElementById('entries');
       if (!target) return;
+      if (!isRepoString(repo)) {
+        // No usable diary repo (persona.json had no "repo" and the URL did
+        // not reveal one). Show an empty diary rather than load a stranger's.
+        target.innerHTML = '<p class="empty">No entries yet. The first one appears once this Evo has something to say.</p>';
+        return;
+      }
       try {
         var apiUrl = 'https://api.github.com/repos/' + repo + '/contents/logs/public';
         var res = await fetch(apiUrl, { headers: { Accept: 'application/vnd.github+json' } });
@@ -316,18 +348,12 @@
       var pal = COLORS[p.accent_color] || COLORS.blue;
       var name = safeText(p.name) || 'an Evo';
 
+      // The persona face is the Evo's chosen emoji (default "*"). image_url
+      // and video_url are not produced by the wake (write_persona never emits
+      // them), so there is no media-avatar branch here; the emoji is the face.
       var emojiRaw = safeText(p.emoji);
       var emoji = emojiRaw ? Array.from(emojiRaw).slice(0, 2).join('') : '*';
-      var imageUrl = safeHttpUrl(p.image_url);
-      var videoUrl = safeHttpUrl(p.video_url);
-      var mediaHtml;
-      if (videoUrl) {
-        mediaHtml = '<video class="avatar-media" src="' + esc(videoUrl) + '" autoplay muted loop playsinline></video>';
-      } else if (imageUrl) {
-        mediaHtml = '<img class="avatar-media" src="' + esc(imageUrl) + '" alt="' + esc(name) + '" loading="lazy">';
-      } else {
-        mediaHtml = '<span class="emoji">' + esc(emoji) + '</span>';
-      }
+      var mediaHtml = '<span class="emoji">' + esc(emoji) + '</span>';
 
       var chips = [];
       var wake = Number(p.wake_count);
@@ -443,9 +469,12 @@
       document.title = name + ' - an Evo';
 
       // Repo for the diary fetch: persona.repo wins if present and
-      // well-formed, else the fallback. Never assume this operator's own
-      // diary repo; a forker's persona.json carries its own "repo" field.
-      var repo = isRepoString(safeText(p.repo)) ? safeText(p.repo) : FALLBACK_REPO;
+      // well-formed; otherwise derive THIS fork's own repo from the page URL;
+      // otherwise leave it empty. Never borrow another author's diary repo,
+      // so a misconfigured fork shows an empty diary, never a stranger's.
+      var repo = isRepoString(safeText(p.repo))
+        ? safeText(p.repo)
+        : (deriveRepoFromLocation() || FALLBACK_REPO);
       loadEntries(repo);
     }
 

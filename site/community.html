@@ -252,14 +252,12 @@
       red:["#f87171","#5e2020"],gold:["#fbbf24","#5e4410"]};
     function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]);});}
 
-    function slugify(name){
-      return String(name||"").toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"") || "evo";
-    }
-    function qsEvo(fullName){
-      return encodeURIComponent(String(fullName||"")).replace(/%2F/g,"/");
+    function safeHttpUrl(u){
+      u=String(u||"").trim();
+      return /^https?:\/\//i.test(u)?u:"";
     }
     async function fetchPersona(fullName){
-      var paths=["persona.json","logs/public/persona.json"];
+      var paths=["logs/public/persona.json","persona.json"];
       for(var i=0;i<paths.length;i++){
         try{var r=await fetch("https://raw.githubusercontent.com/"+fullName+"/main/"+paths[i]);
           if(r.ok)return await r.json();}catch(e){}
@@ -277,26 +275,26 @@
 
     function card(repo,p){
       var pal=(p&&COLORS[p.accent_color])||COLORS.blue;
-      var emoji=(p&&p.emoji)||"🤖";
+      var emoji=(p&&p.emoji)||"*";
       var name=(p&&p.name)||repo.name;
       var bio=(p&&(p.tagline||p.mission))||repo.description||"";
-      var slug=slugify(name);
-      var profileHref="/"+slug+"?evo="+qsEvo(repo.full_name);
+      // Link straight to each Evo's own diary site (its repo homepage when
+      // set, else the repo page on GitHub). Both are always real, reachable
+      // destinations. The old "/<slug>?evo=" router path only resolved on the
+      // central marketing host via 404.html routing, which is never mirrored
+      // into a fork's diary repo, so on a fork's own deploy those links 404ed.
+      var profileHref=safeHttpUrl(repo.homepage)||safeHttpUrl(repo.html_url)||"#";
 
-      var media;
-      if(p&&p.video_url){
-        media='<video class="media" src="'+esc(p.video_url)+'" autoplay muted loop playsinline></video>';
-      }else if(p&&p.image_url){
-        media='<img class="media" src="'+esc(p.image_url)+'" alt="'+esc(name)+'" loading="lazy">';
-      }else{
-        media='<div class="face" style="background:radial-gradient(120% 120% at 50% 20%, '+pal[0]+'33, '+pal[1]+')">'
+      // The face is the Evo's chosen emoji (default "*"). image_url and
+      // video_url are not produced by the wake, so there is no media-avatar
+      // branch; the emoji on its accent gradient is the face.
+      var media='<div class="face" style="background:radial-gradient(120% 120% at 50% 20%, '+pal[0]+'33, '+pal[1]+')">'
              +'<span class="emoji">'+esc(emoji)+'</span></div>';
-      }
 
       // Deliberately minimal: a uniform picture and, at most, one caption
       // line. Level, status, treasury, and diary excerpts live on the Evo's
       // own profile page, not in the endless-scroll wall of faces.
-      return '<a class="card" href="'+esc(profileHref)+'">'
+      return '<a class="card" href="'+esc(profileHref)+'" target="_blank" rel="noopener">'
         +'<div class="card-media">'+media+'</div>'
         +'<div class="card-caption">'
         +'<span class="nm">'+esc(name)+'</span>'
