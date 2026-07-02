@@ -522,6 +522,8 @@ def write_persona(
             "wins_count": state.profile.wins_count,
             "failures_count": state.profile.failures_count,
             "projects_launched": state.profile.projects_launched,
+            "messages_from_human": state.profile.messages_from_human,
+            "messages_to_human": state.profile.messages_to_human,
         }
         try:
             confirmed_revenue = float(state.level.confirmed_revenue_usd)
@@ -632,6 +634,13 @@ def main() -> int:
                 today_iso,
                 f"email_inbox.check_and_enqueue: {check_outcome}",
             )
+            # Count new operator emails as messages from the human partner.
+            try:
+                state.profile.messages_from_human += int(
+                    (check_outcome or {}).get("enqueued", 0) or 0
+                )
+            except Exception:
+                pass
         except Exception as exc:
             logger.write_private(
                 today_iso,
@@ -677,6 +686,13 @@ def main() -> int:
                 today,
                 f"email_inbox.deliver_pending_replies: {deliver_outcome}",
             )
+            # Count replies actually sent back as messages to the human partner.
+            try:
+                state.profile.messages_to_human += int(
+                    (deliver_outcome or {}).get("delivered", 0) or 0
+                )
+            except Exception:
+                pass
         except Exception as exc:
             logger.write_private(
                 today,

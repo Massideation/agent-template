@@ -265,6 +265,16 @@ class Profile(BaseModel):
     failures_count: int = 0
     projects_launched: int = 0
 
+    # Conversation counters. messages_from_human is the key engagement signal:
+    # a human choosing to message their Evo is the leading indicator of a real
+    # bond, and unlike wake_count it cannot happen on its own. messages_to_human
+    # is the Evo's replies back. Counts only, never content, consistent with the
+    # network's aggregate-facts privacy rule. Today these track the email
+    # channel (the two-way default); Telegram adds here once its inbound path
+    # is wired into the wake.
+    messages_from_human: int = 0
+    messages_to_human: int = 0
+
     # Private dedupe helper. The persona v2 schema calls this "_seen_projects";
     # Pydantic v2 rejects leading-underscore field names, so it is named
     # without one here. Tracks every project name ever added to
